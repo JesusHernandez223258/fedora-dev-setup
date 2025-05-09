@@ -1,721 +1,389 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-# ==============================================================================
-# Script de Configuración Automatizada para Fedora (Mejorado)
-# ==============================================================================
-# Este script automatiza la configuración inicial, instalación de repositorios,
-# herramientas de desarrollo y aplicaciones comunes en Fedora.
-# Incorpora mejoras como detección de hardware, manejo de errores, logs
-# y confirmaciones interactivas.
+# #############################################################################
+# SCRIPT DE POST-INSTALACIÓN FEDORA 42 KDE PLASMA (ASUS TUF Dash F15 FX517ZE)
+# Autor: Tu Nombre/Nick (Adaptado por IA Asistente)
+# Versión: 1.1
 #
-# Uso: sudo ./setup.sh <fase>
-# Fases: phase1, phase2, phase3, phase4 (opcional)
-# Para ver la secuencia de fases: ./setup.sh all
-# ==============================================================================
+# IMPORTANTE:
+# 1. EJECUTA ESTE SCRIPT BAJO TU PROPIO RIESGO.
+# 2. REVISA CADA SECCIÓN CUIDADOSAMENTE ANTES DE EJECUTAR.
+# 3. ALGUNAS ACCIONES REQUIEREN REINICIO O RE-LOGUEO AL FINAL.
+# #############################################################################
 
-# --- 1. Configuración Inicial y Opciones Seguras ---
-# Establecer opciones para hacer el script más robusto:
-# -e: Salir inmediatamente si un comando falla (devuelve un estado de salida distinto de cero).
-# -u: Tratar las variables no definidas como un error y salir inmediatamente.
-# -o pipefail: Si cualquier comando en un pipeline falla, todo el pipeline falla.
-set -euo pipefail
+# --- Variables de Configuración (Ajusta según sea necesario) ---
+TARGET_USER=$(logname) # O el usuario principal si se ejecuta como root desde el inicio
+TARGET_USER_HOME="/home/$TARGET_USER"
+# USER_CONFIG_DIR="$TARGET_USER_HOME/dotfiles" # Descomenta y ajusta si tienes tus dotfiles en una carpeta específica
 
-# Capturar errores: Ejecutar una función si ocurre un error (cualquier comando sale con != 0)
-# $LINENO es el número de línea donde ocurrió el error.
-trap 'log_error "Script ha fallado en la línea $LINENO"' ERR
-
-# Capturar señales de salida/interrupción: Limpiar si el script termina inesperadamente.
-cleanup() {
-    log_warn "Terminando script, limpiando recursos si es necesario..."
-    # Añadir aquí comandos para limpiar archivos temporales, detener servicios, etc.
-    # En este script actual, no se crean recursos temporales que necesiten limpieza elaborada.
-}
-trap cleanup EXIT SIGINT SIGTERM
-
-# --- 2. Variables Globales y Rutas ---
-# Identifica al usuario que inició sudo, o el usuario actual si no se usa sudo.
-# Esto es crucial para operaciones que deben ejecutarse como el usuario normal.
-TARGET_USER="${SUDO_USER:-$(whoami)}"
-# Directorio donde está el script.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-# Directorio para archivos de configuración del usuario.
-USER_CONFIG_DIR="$SCRIPT_DIR/config/user"
-# Archivo de configuración de DNF local.
-DNF_CONFIG_FILE="$SCRIPT_DIR/config/dnf/dnf.conf"
-# Archivo de log. Usamos /var/log que requiere permisos de root para escritura.
-# Considera usar un directorio en el HOME del usuario si no quieres requerir root para el log.
-LOGFILE="/var/log/fedora_setup_$(date +%Y%m%d_%H%M%S).log" # Nombre de log único por ejecución.
-
-# --- 3. Estilo de Salida y Colores ---
-# Colores ANSI para mensajes. Usamos '-e' en echo para interpretar escapes.
-COLOR_GREEN='\033[0;32m'
-COLOR_YELLOW='\033[0;33m'
-COLOR_RED='\033[0;31m'
-COLOR_RESET='\033[0m' # Restablece el color al por defecto
-
-# Funciones de logging mejoradas: Imprimen en consola y registran en el archivo de log.
-# Usamos 'tee -a' para mostrar en pantalla y anexar al archivo.
-# Añadimos timestamp a cada entrada del log.
-log_info() {
-    echo -e "$(date '+%Y-%m-%d %H:%M:%S') [INFO] ${COLOR_GREEN}$1${COLOR_RESET}" | tee -a "$LOGFILE"
-}
-log_warn() {
-    echo -e "$(date '+%Y-%m-%d %H:%M:%S') [WARN] ${COLOR_YELLOW}$1${COLOR_RESET}" | tee -a "$LOGFILE" >&2 # Envía warnings a stderr
-}
-log_error() {
-    echo -e "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] ${COLOR_RED}$1${COLOR_RESET}" | tee -a "$LOGFILE" >&2 # Envía errores a stderr
-}
-log_debug() {
-    # Activar debug con set -x para ver estas líneas
-    # echo -e "$(date '+%Y-%m-%d %H:%M:%S') [DEBUG] $1" | tee -a "$LOGFILE" >&2
-    : # No hace nada por defecto
+# --- Funciones de Ayuda ---
+print_message() {
+  echo ""
+  echo "================================================================================"
+  echo "== $1"
+  echo "================================================================================"
+  echo ""
+  sleep 2
 }
 
-# --- 4. Validaciones Iniciales ---
-# Crear el archivo de log si no existe (se crea automáticamente con tee -a, pero esto asegura el directorio).
-mkdir -p "$(dirname "$LOGFILE")" || log_error "No se pudo crear el directorio para el archivo de log $LOGFILE. Verifique permisos."
+log_info() { echo -e "\e[34mINFO:\e[0m $1"; }
+log_warn() { echo -e "\e[33mWARN:\e[0m $1"; }
+log_error() { echo -e "\e[31mERROR:\e[0m $1"; }
+COLOR_RED="\e[31m"
+COLOR_GREEN="\e[32m"
+COLOR_YELLOW="\e[33m"
+COLOR_RESET="\e[0m"
 
-# Validar que el script se ejecute como root para las fases que lo requieren.
-check_root() {
-    if [[ $EUID -ne 0 ]]; then
-       log_error "Este script (o esta fase) debe ejecutarse con sudo."
-       log_error "Uso: sudo ./setup.sh <fase>"
-       exit 1
-    fi
-    log_info "Ejecutando con permisos de root. Procediendo..."
-}
+# --- Pedir contraseña de sudo al inicio y mantenerla viva ---
+if ! sudo -v; then
+    log_error "Se requieren privilegios de sudo. Saliendo."
+    exit 1
+fi
+# Mantener sudo vivo
+while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 
-# Validar que comandos esenciales están disponibles.
-check_dependencies() {
-    local cmds=("dnf" "sudo" "git" "curl" "systemctl" "tee" "date" "grep" "sed")
-    local missing=()
-    for cmd in "${cmds[@]}"; do
-        if ! command -v "$cmd" &>/dev/null; then
-            missing+=("$cmd")
-        fi
-    done
-    if [ ${#missing[@]} -ne 0 ]; then
-        log_error "Comandos necesarios no encontrados: ${missing[*]}"
-        log_error "Por favor, asegúrese de que estos comandos estén instalados y en su PATH."
-        exit 1
-    fi
-    log_info "Dependencias básicas encontradas."
-}
+# --- Determinar archivo de perfil del usuario ---
+PROFILE_FILE="$TARGET_USER_HOME/.bashrc"
+if [ -f "$TARGET_USER_HOME/.zshrc" ]; then
+    PROFILE_FILE="$TARGET_USER_HOME/.zshrc"
+fi
+log_info "Archivo de perfil detectado/seleccionado: $PROFILE_FILE"
 
-# Validar la existencia de archivos de configuración locales.
-check_config_files() {
-    log_info "Verificando archivos de configuración locales en $SCRIPT_DIR..."
-    if [ ! -d "$USER_CONFIG_DIR" ]; then
-        log_warn "Directorio de configuración de usuario $USER_CONFIG_DIR no encontrado. Algunas configuraciones pueden ser omitidas."
-    fi
-     if [ ! -f "$DNF_CONFIG_FILE" ]; then
-        log_warn "Archivo de configuración de DNF local $DNF_CONFIG_FILE no encontrado. Los ajustes de DNF locales serán omitidos."
-    fi
-    log_info "Verificación de archivos de configuración completada."
-}
+# #################################################
+# SECCIÓN A: OPTIMIZACIÓN DNF, REPOSITORIOS Y ACTUALIZACIÓN INICIAL
+# #################################################
+print_message "SECCIÓN A: Optimizando DNF, Configurando Repositorios y Actualización Inicial"
 
+log_info "Optimizando configuración de DNF..."
+if ! grep -q "fastestmirror=True" /etc/dnf/dnf.conf; then
+    echo 'fastestmirror=True' | sudo tee -a /etc/dnf/dnf.conf
+fi
+if ! grep -q "max_parallel_downloads=10" /etc/dnf/dnf.conf; then
+    echo 'max_parallel_downloads=10' | sudo tee -a /etc/dnf/dnf.conf
+fi
+# Descomentar con precaución:
+# if ! grep -q "defaultyes=True" /etc/dnf/dnf.conf; then
+#     echo 'defaultyes=True' | sudo tee -a /etc/dnf/dnf.conf # Acepta automáticamente todas las preguntas de DNF
+# fi
 
-# --- 5. Detección de Hardware ---
-detect_hardware() {
-    log_info "Detectando hardware..."
-    # Detección de GPU
-    GPU_TYPE="Unknown"
-    if lspci | grep -i 'vga.*nvidia' &>/dev/null; then
-        GPU_TYPE="Nvidia"
-        log_info "GPU detectada: Nvidia."
-    elif lspci | grep -i 'vga.*advanced micro devices' &>/dev/null || lspci | grep -i 'vga.*amd/ati' &>/dev/null; then
-        GPU_TYPE="AMD"
-        log_info "GPU detectada: AMD."
-    elif lspci | grep -i 'vga.*intel' &>/dev/null; then
-        GPU_TYPE="Intel"
-        log_info "GPU detectada: Intel Integrada."
-    else
-        log_warn "No se pudo detectar un tipo de GPU conocido (Nvidia, AMD, Intel)."
-    fi
+log_info "Habilitando Repositorios RPM Fusion (Free y Nonfree)..."
+sudo dnf install -y \
+  https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
+  https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+sudo dnf config-manager --set-enabled rpmfusion-free-updates-testing rpmfusion-nonfree-updates-testing # Habilitar repos testing (opcional)
 
-    # Detección de soporte de virtualización por hardware (VT-x/AMD-V)
-    VIRT_SUPPORT="False"
-    if egrep -q '(vmx|svm)' /proc/cpuinfo; then
-        VIRT_SUPPORT="True"
-        log_info "Soporte de virtualización (VT-x/AMD-V) detectado en la CPU."
-    else
-        log_warn "Soporte de virtualización por hardware (VT-x/AMD-V) no detectado en la CPU."
-    fi
+log_info "Habilitando Repositorio Terra..."
+sudo dnf install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
 
-    log_info "Detección de hardware completada. GPU: $GPU_TYPE, Virtualización HW: $VIRT_SUPPORT."
-}
+log_info "Habilitando Repositorio Flathub..."
+sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
-# --- 6. Funciones para cada fase de instalación ---
+log_info "Instalando y Habilitando Soporte Snapd..."
+sudo dnf install -y snapd
+if [ ! -L /snap ]; then # Solo crear el enlace simbólico si no existe
+    sudo ln -s /var/lib/snapd/snap /snap
+fi
+sudo systemctl enable --now snapd.socket
 
-phase1_initial_setup() {
-    log_info "=== Fase 1: Configuración Inicial y Repositorios ==="
-    check_root # Asegurarse de que se ejecuta con root.
+log_info "Instalando COPR CLI..."
+sudo dnf install -y copr-cli
 
-    log_info "Aplicando ajustes en /etc/dnf/dnf.conf..."
-    if [ -f "$DNF_CONFIG_FILE" ]; then
-        # Leer el archivo local de DNF y aplicar sus configuraciones al archivo del sistema.
-        # Esto es un ejemplo simple: solo añade líneas si no existen.
-        # Una implementación más robusta usaría sed para reemplazar valores existentes en [main].
-        log_info "Aplicando max_parallel_downloads=10..."
-        grep -qxF 'max_parallel_downloads=10' /etc/dnf/dnf.conf || echo 'max_parallel_downloads=10' | tee -a /etc/dnf/dnf.conf > /dev/null || log_warn "Fallo al agregar max_parallel_downloads."
-        log_info "Aplicando deltarpm=True..."
-        grep -qxF 'deltarpm=True' /etc/dnf/dnf.conf || echo 'deltarpm=True' | tee -a /etc/dnf/dnf.conf > /dev/null || log_warn "Fallo al agregar deltarpm."
-        log_info "Aplicando defaultyes=True..." # ¡Advertencia! defaultyes puede ser peligroso. Considera removerlo o hacerlo opcional.
-        grep -qxF 'defaultyes=True' /etc/dnf/dnf.conf || echo 'defaultyes=True' | tee -a /etc/dnf/dnf.conf > /dev/null || log_warn "Fallo al agregar defaultyes."
-        log_info "Ajustes de DNF aplicados (añadidos si no existían)."
-    else
-        log_warn "No se encontró el archivo de configuración de DNF local en $DNF_CONFIG_FILE. Saltando ajuste de DNF."
-    fi
+log_info "Habilitando COPR para ASUS Linux Tools (asusctl, supergfxctl)..."
+sudo dnf copr enable -y lukenukem/asus-linux
 
-    log_info "Instalando herramientas básicas y plugins DNF..."
-    # dn f install -y ... || log_error "Fallo al instalar herramientas básicas." # Set -e ya lo maneja
-    dnf install -y dnf-plugins-core unzip p7zip p7zip-plugins unrar fastfetch git
+log_info "Habilitando COPR para Kernel ASUS CachyOS..."
+sudo dnf copr enable -y lukenukem/asus-kernel
 
-    log_info "Habilitando repositorios RPMFusion..."
-    # dn f install -y ... || log_error "Fallo al habilitar RPMFusion." # Set -e ya lo maneja
-    dnf install -y \
-      https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
-      https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+log_info "Habilitando Repositorio Negativo17 para Drivers NVIDIA y Multimedia..."
+sudo dnf config-manager addrepo --from-repofile=https://negativo17.org/repos/fedora-nvidia.repo
+sudo dnf config-manager addrepo --from-repofile=https://negativo17.org/repos/fedora-multimedia.repo
 
-    log_info "Actualizando grupo core de DNF..."
-    dnf group upgrade -y core # Dnf core upgrade
-    if command -v dnf5 &>/dev/null; then
-        log_info "Actualizando grupo core de DNF5 (si está disponible)..."
-        dnf5 group upgrade -y core # Dnf5 core upgrade if available
-    fi
+log_info "Añadiendo Repositorio Oficial de Docker..."
+sudo dnf config-manager addrepo --from-repofile="https://download.docker.com/linux/fedora/docker-ce.repo" || log_warn "Fallo al añadir repo de Docker oficial."
 
-    log_info "Habilitando repositorios Tainted de RPMFusion..."
-    # dn f install -y ... || log_error "Fallo al habilitar RPMFusion Tainted." # Set -e ya lo maneja
-    dnf install -y rpmfusion-free-release-tainted rpmfusion-nonfree-release-tainted
+log_info "Actualizando el sistema y metadatos de repositorios..."
+sudo dnf upgrade --refresh -y
+sudo dnf groupupdate -y core # Asegura que el grupo base está actualizado
 
-    log_info "Instalando COPR CLI..."
-    # dn f install -y ... || log_error "Fallo al instalar COPR CLI." # Set -e ya lo maneja
-    dnf install -y copr-cli
+# #################################################
+# SECCIÓN B: SISTEMA BASE - DRIVERS, FIRMWARE, KERNEL, MULTIMEDIA
+# #################################################
+print_message "SECCIÓN B: Configurando Sistema Base (Drivers, Firmware, Kernel, Multimedia)"
 
-    log_info "Habilitando repositorio Terra (Nota: Se usa --nogpgcheck - considera añadir la clave GPG)..."
-    # Buscar la clave GPG de Terra e importarla sería lo ideal en lugar de --nogpgcheck
-    # dnf install --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' -y terra-release || log_error "Fallo al habilitar repositorio Terra." # Set -e ya lo maneja
-     dnf install --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' -y terra-release
+log_info "Actualizando Firmware del sistema..."
+sudo fwupdmgr refresh --force
+sudo fwupdmgr get-devices
+sudo fwupdmgr get-updates
+sudo fwupdmgr update -y
 
+log_info "Instalando Drivers NVIDIA desde Negativo17 con soporte CUDA y multimedia..."
+# Instalar dkms asegura que los módulos se recompilen con actualizaciones de kernel
+sudo dnf install -y \
+  xorg-x11-drv-nvidia-dkms \
+  nvidia-modprobe \
+  nvidia-settings \
+  nvidia-driver-cuda \
+  libva-nvidia-driver
+  # nvidia-cuda-toolkit es muy grande, considera instalarlo solo si lo necesitas para desarrollo CUDA
+  # ffmpeg-nvidia y gstreamer1-plugins-bad-freeworld se instalarán con el grupo multimedia más adelante
 
-    log_info "Habilitando soporte Flatpak y Snap..."
-    # dn f install -y snapd || log_error "Fallo al instalar snapd." # Set -e ya lo maneja
-    dnf install -y snapd
+log_info "Instalando Kernel parcheado para ASUS (CachyOS)..."
+sudo dnf install -y kernel-rog-cachyos kernel-rog-cachyos-devel kernel-rog-cachyos-headers
 
-    # Habilitar y iniciar el servicio snapd
-    log_info "Habilitando e iniciando servicio snapd..."
-    systemctl enable --now snapd || log_warn "No se pudo habilitar/iniciar snapd. Intenta 'sudo systemctl enable --now snapd' y 'sudo systemctl start snapd' manualmente."
-    systemctl status snapd --no-pager || log_warn "snapd service no está activo. Intenta 'sudo systemctl start snapd' manualmente."
-    # Esperar un poco por si snapd necesita inicializarse
-    sleep 5
-    # snapd socket para --classic snaps
-    log_info "Habilitando e iniciando snapd.socket..."
-    systemctl enable --now snapd.socket || log_warn "No se pudo habilitar/iniciar snapd.socket. Intenta 'sudo systemctl enable --now snapd.socket' y 'sudo systemctl start snapd.socket' manualmente."
+log_info "Instalando Herramientas ASUS (asusctl y supergfxctl)..."
+sudo dnf install -y asusctl supergfxctl asusctl-rog-gui
+log_info "Habilitando servicio supergfxd para gestión de GPU híbrida..."
+sudo systemctl enable --now supergfxd.service
 
+log_info "Instalando Codecs Multimedia y Librerías Esenciales..."
+sudo dnf groupinstall -y --allowerasing --skip-broken multimedia sound-and-video
+sudo dnf install -y gstreamer1-plugins-{bad-\*,good-\*,base} gstreamer1-libav \
+                    lame\* --exclude=lame-devel \
+                    libdvdcss ffmpegthumbnailer libva-utils vdpauinfo \
+                    libavcodec-freeworld # De RPM Fusion para H.264/H.265
 
-    # Añadir flathub remote como el usuario objetivo (flatpak remote-add corre como usuario)
-    log_info "Añadiendo remote de Flathub para el usuario '$TARGET_USER'..."
-    # sudo -u "$TARGET_USER" flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || log_warn "Fallo al añadir remote de Flathub." # Set -e no funciona bien con sudo -u pipe
-     if ! sudo -u "$TARGET_USER" flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo; then
-         log_warn "Fallo al añadir remote de Flathub. Verifica si flatpak está instalado o si el usuario $TARGET_USER existe y tiene permisos."
-     fi
-    log_info "Soporte Flatpak y Snap habilitado (si los servicios se iniciaron correctamente)."
+log_info "Instalando soporte para paquetes de 32 bits (para Wine, Steam, etc.)..."
+sudo dnf install -y glibc.i686 libstdc++.i686 mesa-libGL.i686 mesa-libEGL.i686 \
+                    mesa-dri-drivers.i686 mesa-vulkan-drivers.i686 \
+                    pipewire-alsa.i686 alsa-lib.i686 \
+                    libX11.i686 libXext.i686 libXrandr.i686 libXfixes.i686 \
+                    fontconfig.i686 freetype.i686 \
+                    xorg-x11-drv-nvidia-libs.i686 # Para NVIDIA 32-bit
 
-    log_info "Realizando actualización completa del sistema y grupos..."
-    dnf upgrade -y --refresh # || log_error "Fallo durante dnf upgrade --refresh." # Set -e
-    # Excluimos este plugin que a veces causa conflictos
-    dnf groupupdate -y core --exclude=PackageKit-gstreamer-plugin # || log_error "Fallo durante dnf groupupdate core." # Set -e
-    log_info "Actualización completa del sistema realizada."
+# #################################################
+# SECCIÓN C: UTILIDADES Y HERRAMIENTAS COMUNES
+# #################################################
+print_message "SECCIÓN C: Instalando Utilidades y Herramientas Comunes"
 
-    # 7. Validar acción peligrosa: Actualizar Firmware
-    log_warn "La siguiente acción actualizará el firmware de tu sistema usando fwupdmgr."
-    read -r -p "¿Desea proceder con la actualización del firmware? [S/n]: " confirm_fw
-    confirm_fw=${confirm_fw:-S} # Default a 'S' si se presiona Enter
+sudo dnf install -y htop fastfetch nano unzip p7zip p7zip-plugins \
+                    gnome-disk-utility file-roller ark kio-fuse kio-gdrive \
+                    ffmpeg fuse # fuse para AppImage
 
-    if [[ "$confirm_fw" =~ ^[Ss]$ ]]; then
-        log_info "Actualizando firmware del sistema..."
-        fwupdmgr refresh --force # || log_error "Fallo al refrescar fwupdmgr." # Set -e
-        fwupdmgr update -y # || log_error "Fallo al actualizar firmware." # Set -e
-        log_info "Actualización de firmware completada (si había actualizaciones disponibles)."
-    else
-        log_info "Actualización de firmware cancelada por el usuario."
-    fi
+log_info "Instalando Grupos de Desarrollo y Sistema recomendados..."
+sudo dnf groupinstall -y admin-tools c-development desktop-accessibility development-tools system-tools python-science
+sudo dnf install -y vlc # VLC como reproductor
 
-    log_info "=== Fin de la Fase 1 ==="
-    log_warn "Por favor, ${COLOR_RED}REINICIA${COLOR_YELLOW} tu sistema ahora para que los cambios en los repositorios y el firmware surtan efecto correctamente."
-    log_warn "Después de reiniciar, ejecuta este script nuevamente con el argumento 'phase2':"
-    log_warn "sudo ./setup.sh phase2"
-    exit 0 # Salir para forzar el reinicio
-}
+# #################################################
+# SECCIÓN D: HERRAMIENTAS DE DESARROLLO Y VIRTUALIZACIÓN
+# #################################################
+print_message "SECCIÓN D: Herramientas de Desarrollo y Virtualización"
 
-phase2_system_dev_base() {
-    log_info "=== Fase 2: Soporte del Sistema y Entorno de Desarrollo Base ==="
-    check_root # Asegurarse de que se ejecuta con root.
-    detect_hardware # Ejecutar detección de hardware para esta fase.
+log_info "Instalando Git..."
+sudo dnf install -y git
 
-    # 8. Detección de Hardware y Validación: Instalar Drivers (Nvidia - Opcional/Hardware específico)
-    log_info "Instalando drivers (Nvidia, Multimedia). Nota: Los drivers Nvidia son específicos de hardware."
-    if [ "$GPU_TYPE" == "Nvidia" ]; then
-        log_warn "Se detectó hardware Nvidia. La siguiente acción instalará los drivers propietarios."
-        read -r -p "¿Desea instalar los drivers propietarios de Nvidia? (Esto requiere los repos RPMFusion instalados en Fase 1 y puede requerir Secure Boot) [S/n]: " install_nvidia
-        install_nvidia=${install_nvidia:-S}
+log_info "Instalando Python (asegurando pip y venv)..."
+sudo dnf install -y python3 python3-pip python3-devel python3-virtualenv
 
-        if [[ "$install_nvidia" =~ ^[Ss]$ ]]; then
-            log_info "Instalando drivers y soporte Nvidia..."
-            # dnf install -y ... || log_error "Fallo al instalar drivers Nvidia." # Set -e
-            dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda xorg-x11-drv-nvidia-power vulkan xorg-x11-drv-nvidia-cuda-libs
-            log_info "Habilitando servicios de suspensión/resumen de Nvidia..."
-            systemctl enable --now nvidia-{suspend,resume,hibernate} || log_warn "No se pudieron habilitar los servicios de suspend/resume de Nvidia."
-            log_info "Drivers y soporte Nvidia instalados (requiere reinicio para cargar el módulo del kernel)."
+log_info "Instalando Java (OpenJDK), Maven y Ant+Ivy..."
+sudo dnf install -y java-devel java-openjdk-headless java-openjdk maven ant apache-ivy
+
+log_info "Instalando Golang y configurando PATH..."
+sudo dnf install -y golang
+sudo -u "$TARGET_USER" mkdir -p "$TARGET_USER_HOME/go"
+if ! grep -q 'export GOPATH=' "$PROFILE_FILE"; then
+    echo 'export GOPATH=$HOME/go' | sudo -u "$TARGET_USER" tee -a "$PROFILE_FILE" > /dev/null
+fi
+if ! grep -q 'export PATH=.*$GOPATH/bin' "$PROFILE_FILE"; then
+    echo 'export PATH=$PATH:$GOPATH/bin' | sudo -u "$TARGET_USER" tee -a "$PROFILE_FILE" > /dev/null
+fi
+log_info "GOPATH y PATH para Golang configurados. Re-logueo o 'source $PROFILE_FILE' necesario."
+
+log_info "Instalando Node.js (vía módulo DNF) y Yarn..."
+sudo dnf module install -y nodejs
+sudo dnf install -y yarnpkg
+log_info "Configurando directorio global de npm y PATH..."
+sudo -u "$TARGET_USER" mkdir -p "$TARGET_USER_HOME/.npm-global"
+sudo -u "$TARGET_USER" npm config set prefix "$TARGET_USER_HOME/.npm-global"
+if ! grep -q 'export PATH=.*\.npm-global/bin' "$PROFILE_FILE"; then
+    echo 'export PATH=$HOME/.npm-global/bin:$PATH' | sudo -u "$TARGET_USER" tee -a "$PROFILE_FILE" > /dev/null
+fi
+log_info "PATH para npm configurado. Re-logueo o 'source $PROFILE_FILE' necesario."
+
+log_info "Instalando Bun (runtime de JavaScript)..."
+if command -v bun &>/dev/null; then
+    log_info "Bun ya está instalado."
+else
+    log_warn "Se procederá a descargar y ejecutar el script de instalación de Bun."
+    read -r -p "¿Desea continuar? [S/n]: " confirm_bun
+    confirm_bun=${confirm_bun:-S}
+    if [[ "$confirm_bun" =~ ^[Ss]$ ]]; then
+        if sudo -u "$TARGET_USER" curl -fsSL https://bun.sh/install | bash; then
+            log_info "Bun instalado. Re-logueo o nueva terminal para usar 'bun'."
         else
-            log_info "Instalación de drivers Nvidia cancelada por el usuario."
-        fi
-    elif [ "$GPU_TYPE" == "AMD" ]; then
-        log_info "Se detectó hardware AMD. Los drivers de código abierto ya están incluidos en el kernel y Mesa."
-        log_info "Instalando firmware AMD adicional desde rpmfusion-nonfree-tainted..."
-        dnf --repo=rpmfusion-nonfree-tainted install -y amd-gpu-firmware || log_warn "Fallo al instalar firmware AMD adicional."
-    elif [ "$GPU_TYPE" == "Intel" ]; then
-         log_info "Se detectó hardware Intel. Los drivers de código abierto ya están incluidos en el kernel y Mesa."
-         log_info "Instalando intel-media-driver para aceleración de video..."
-         dnf install -y intel-media-driver || log_warn "Fallo la instalación de intel-media-driver. Ignorando si no tienes hardware Intel compatible."
-    else
-        log_warn "No se detectó hardware gráfico específico para instalar drivers adicionales (Nvidia/AMD/Intel)."
-    fi
-
-
-    log_info "Instalando Soporte Multimedia y Codecs..."
-    log_info "Cambiando a FFMPEG completo..."
-    dnf swap -y ffmpeg-free ffmpeg --allowerasing # || log_error "Fallo al swappear FFMPEG." # Set -e
-    log_info "Actualizando grupo multimedia..."
-    # Actualiza el grupo multimedia, excluyendo el plugin conflictivo
-    dnf update -y @multimedia --setopt="install_weak_deps=False" --exclude=PackageKit-gstreamer-plugin # || log_error "Fallo durante dnf update @multimedia." # Set -e
-    log_info "Instalando grupo sound-and-video..."
-    dnf group install -y sound-and-video # Instalar paquetes de sonido y video complementarios # || log_error "Fallo al instalar grupo sound-and-video." # Set -e
-    log_info "Instalando drivers multimedia específicos (VAAPI)..."
-    # Drivers multimedia específicos (Nvidia VAAPI - solo si no es Intel o AMD, o si Nvidia drivers fueron instalados)
-    if [ "$GPU_TYPE" == "Nvidia" ] && [[ "$install_nvidia" =~ ^[Ss]$ ]]; then # Solo instalar si es Nvidia y se instalaron drivers
-         log_info "Instalando libva-nvidia-driver..."
-         dnf install -y libva-nvidia-driver || log_warn "Fallo la instalación de libva-nvidia-driver. Ignorando si no tienes hardware Nvidia compatible."
-    fi
-     # Firmware adicional de rpmfusion-nonfree-tainted (excepto AMD ya manejado)
-    if [ "$GPU_TYPE" != "AMD" ]; then
-        log_info "Instalando firmware adicional (no-AMD) desde rpmfusion-nonfree-tainted..."
-        dnf --repo=rpmfusion-nonfree-tainted install -y "*-firmware" || log_warn "Fallo al instalar firmware adicional."
-    fi
-    log_info "Soporte multimedia y codecs instalados."
-
-    log_info "Instalando Grupos de Desarrollo y Sistema recomendados..."
-    # dnf group install -y ... || log_error "Fallo al instalar grupos de software." # Set -e
-    dnf group install -y admin-tools c-development desktop-accessibility development-tools system-tools python-science vlc
-
-    # 8. Detección de Hardware: Soporte de Virtualización (KVM/QEMU/libvirt)
-    log_info "Instalando soporte de virtualización (KVM/QEMU/libvirt)..."
-    if [ "$VIRT_SUPPORT" == "True" ]; then
-         log_info "Se detectó soporte de virtualización por hardware (VT-x/AMD-V). Instalando paquetes de virtualización."
-         # dnf install -y @virtualization ... || log_error "Fallo al instalar paquetes de virtualización." # Set -e
-         dnf install -y @virtualization qemu-kvm-core libvirt virt-install cockpit-machines guestfs-tools
-    else
-         log_warn "No se detectó soporte de virtualización por hardware (VT-x/AMD-V). Aun así, se instalarán los paquetes de virtualización, pero el rendimiento puede ser limitado (uso de emulación)."
-         dnf install -y @virtualization qemu-kvm-core libvirt virt-install cockpit-machines guestfs-tools
-    fi
-
-    log_info "Habilitando e iniciando servicio libvirtd..."
-    systemctl enable --now libvirtd || log_warn "Fallo al habilitar/iniciar libvirtd. Intenta 'sudo systemctl enable --now libvirtd' y 'sudo systemctl start libvirtd' manualmente."
-
-    log_info "Añadiendo usuario '$TARGET_USER' al grupo libvirt..."
-    # Verificar si el usuario ya pertenece al grupo
-    if groups "$TARGET_USER" | grep -q '\blibvirt\b'; then
-        log_info "El usuario '$TARGET_USER' ya pertenece al grupo 'libvirt'. Saltando adición."
-    else
-        # groupadd docker &>/dev/null # Este es el de docker, el de libvirt ya existe.
-        usermod -aG libvirt "$TARGET_USER" || log_warn "Fallo al añadir '$TARGET_USER' al grupo 'libvirt'."
-        log_info "Usuario '$TARGET_USER' añadido al grupo 'libvirt'."
-        log_warn "Recuerda que deberás ${COLOR_RED}cerrar y volver a iniciar sesión${COLOR_YELLOW} para que la pertenencia al grupo libvirt surta efecto."
-    fi
-
-
-    log_info "Instalando Docker Engine y Componentes..."
-    # Asumimos que el repo de Docker se añadió en Fase 1 si era necesario (aunque el script actual no lo añade explícitamente).
-    # Si el repo de Docker oficial es necesario, debería añadirse aquí o en fase 1.
-    # El script actual instala docker-ce desde los repos de Fedora/RPMFusion si está disponible ahí.
-    # Para el repo oficial de docker:
-    # dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo || log_warn "Fallo al añadir repo de Docker oficial."
-    # dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || log_error "Fallo al instalar Docker Engine." # Set -e
-     dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-    log_info "Habilitando e iniciando servicio docker..."
-    systemctl enable --now docker || log_warn "Fallo al habilitar/iniciar docker. Intenta 'sudo systemctl enable --now docker' y 'sudo systemctl start docker' manualmente."
-
-    log_info "Añadiendo usuario '$TARGET_USER' al grupo docker..."
-     if groups "$TARGET_USER" | grep -q '\bdocker\b'; then
-        log_info "El usuario '$TARGET_USER' ya pertenece al grupo 'docker'. Saltando adición."
-    else
-        groupadd docker &>/dev/null # Asegurarse de que el grupo existe (sin error si ya existe)
-        usermod -aG docker "$TARGET_USER" || log_warn "Fallo al añadir '$TARGET_USER' al grupo 'docker'."
-        log_info "Usuario '$TARGET_USER' añadido al grupo 'docker'."
-        log_warn "Recuerda que deberás ${COLOR_RED}cerrar y volver a iniciar sesión${COLOR_YELLOW} para que la pertenencia al grupo docker surta efecto y puedas usar 'docker' sin sudo."
-    fi
-
-    log_info "Instalando Java (OpenJDK), Maven y Ant+Ivy..."
-    dnf install -y java-devel maven ant apache-ivy # || log_error "Fallo al instalar Java/Maven/Ant." # Set -e
-
-    log_info "Instalando Golang..."
-    dnf install -y golang # || log_error "Fallo al instalar Golang." # Set -e
-    log_info "Configurando GOPATH y PATH para Golang para el usuario '$TARGET_USER'..."
-    # Determinar el archivo de perfil del usuario
-    PROFILE_FILE="/home/$TARGET_USER/.bashrc"
-    if [ -f "/home/$TARGET_USER/.zshrc" ]; then
-        PROFILE_FILE="/home/$TARGET_USER/.zshrc"
-    fi
-    log_info "Usando archivo de perfil: $PROFILE_FILE"
-
-    # Crear directorio go para el usuario y configurar GOPATH/PATH de forma idempotente.
-    sudo -u "$TARGET_USER" mkdir -p "$HOME/go" || log_warn "Fallo al crear directorio $HOME/go para el usuario $TARGET_USER."
-    if ! sudo -u "$TARGET_USER" grep -q 'export GOPATH=' "$PROFILE_FILE"; then
-        echo 'export GOPATH=$HOME/go' | sudo tee -a "$PROFILE_FILE" > /dev/null || log_warn "Fallo al configurar GOPATH en $PROFILE_FILE."
-    fi
-     if ! sudo -u "$TARGET_USER" grep -q 'export PATH=.*$GOPATH/bin' "$PROFILE_FILE"; then
-        echo 'export PATH=$PATH:$GOPATH/bin' | sudo tee -a "$PROFILE_FILE" > /dev/null || log_warn "Fallo al configurar PATH para Go en $PROFILE_FILE."
-    fi
-    log_info "GOPATH y PATH para Golang configurados para el usuario '$TARGET_USER'."
-    log_warn "Deberás ${COLOR_RED}cerrar y volver a iniciar sesión${COLOR_YELLOW} (o hacer 'source $PROFILE_FILE') para que los cambios en GOPATH/PATH surtan efecto."
-
-
-    log_info "Instalando Node.js y Yarn..."
-    dnf install -y nodejs yarnpkg # || log_error "Fallo al instalar Node.js/Yarn." # Set -e
-    log_info "Configurando directorio global de npm y PATH para el usuario '$TARGET_USER'..."
-    # Crear directorio global de npm para el usuario y configurar prefix/PATH de forma idempotente.
-    sudo -u "$TARGET_USER" mkdir -p "$HOME/.npm-global" || log_warn "Fallo al crear directorio $HOME/.npm-global para el usuario $TARGET_USER."
-    # Configurar prefix para npm para el usuario (debe correr como el usuario)
-    sudo -u "$TARGET_USER" npm config set prefix "$HOME/.npm-global" || log_warn "Fallo al configurar prefix de npm para el usuario $TARGET_USER."
-    # Añadir el directorio global de npm al PATH en el archivo de perfil del usuario
-    if ! sudo -u "$TARGET_USER" grep -q 'export PATH=.*\.npm-global/bin' "$PROFILE_FILE"; then
-        echo 'export PATH=~/.npm-global/bin:$PATH' | sudo tee -a "$PROFILE_FILE" > /dev/null || log_warn "Fallo al configurar PATH para npm en $PROFILE_FILE."
-    fi
-    log_info "Directorio global de npm y PATH configurados para el usuario '$TARGET_USER'."
-     log_warn "Deberás ${COLOR_RED}cerrar y volver a iniciar sesión${COLOR_YELLOW} (o hacer 'source $PROFILE_FILE') para que los cambios en PATH surtan efecto."
-
-
-    log_info "Instalando Bun (descargando script de internet)..."
-    # NOTA: Descargar y ejecutar scripts directamente de internet es una práctica con riesgos de seguridad.
-    # Es preferible descargar el script, revisarlo y luego ejecutarlo.
-    if command -v bun &>/dev/null; then
-        log_info "Bun ya parece estar instalado. Saltando instalación."
-    else
-        log_warn "Se procederá a descargar y ejecutar el script de instalación de Bun de bun.sh."
-        read -r -p "¿Desea continuar con la instalación de Bun? [S/n]: " confirm_bun
-        confirm_bun=${confirm_bun:-S}
-        if [[ "$confirm_bun" =~ ^[Ss]$ ]]; then
-             # Ejecutar el script de instalación de Bun como el usuario objetivo
-             # El script de Bun gestiona su propio PATH
-             if sudo -u "$TARGET_USER" curl -fsSL https://bun.sh/install | bash; then
-                 log_info "Bun instalado (si el script se ejecutó correctamente)."
-                 log_warn "El instalador de Bun intenta añadirlo a tu PATH. Deberás ${COLOR_RED}cerrar y volver a iniciar sesión${COLOR_YELLOW} (o abrir una nueva terminal) para que el comando 'bun' esté disponible."
-             else
-                 log_warn "Fallo en la ejecución del script de instalación de Bun."
-             fi
-        else
-            log_info "Instalación de Bun cancelada por el usuario."
-        fi
-    fi
-
-    log_info "=== Fin de la Fase 2 ==="
-    log_warn "La instalación de la base del sistema y entorno de desarrollo ha finalizado."
-    log_warn "Es ${COLOR_RED}MUY RECOMENDABLE${COLOR_YELLOW} que ahora ${COLOR_RED}CIERRES TU SESIÓN ACTUAL${COLOR_YELLOW} (gráfica o de terminal) y vuelvas a iniciarla."
-    log_warn "Esto es necesario para que los cambios en los grupos (docker, libvirt) y las variables de entorno (PATH para Go, Node/npm, Bun) surtan efecto."
-    log_warn "Después de re-loguearte, ejecuta este script nuevamente con el argumento 'phase3' para configurar la terminal y las apps:"
-    log_warn "sudo ./setup.sh phase3"
-    exit 0
-}
-
-phase3_terminal_apps() {
-    log_info "=== Fase 3: Configuración de Terminal y Aplicaciones ==="
-    # Esta fase incluye la configuración de usuario y Flatpaks, que idealmente corren como usuario normal.
-    # Sin embargo, para simplificar el manejo de sudo, el script maestro puede correr con sudo
-    # y usar 'sudo -u $TARGET_USER' para los comandos de usuario.
-    check_root # Asegurarse de que se ejecuta con root.
-
-    log_info "Configurando terminal (Zsh, Oh My Zsh, Powerlevel10k) para el usuario '$TARGET_USER'..."
-
-    # Instalar Zsh y Git si no se hizo en Fase 2 (o por si acaso)
-    log_info "Instalando Zsh y Git (si no están ya instalados)..."
-    dnf install -y zsh git # || log_error "Fallo al instalar Zsh/Git." # Set -e
-
-    # 9. Validación de acción peligrosa: Cambiar shell por defecto
-    log_warn "Se procederá a cambiar la shell por defecto del usuario '$TARGET_USER' a Zsh."
-    read -r -p "¿Desea cambiar la shell por defecto a Zsh? [S/n]: " confirm_chsh
-    confirm_chsh=${confirm_chsh:-S}
-
-    if [[ "$confirm_chsh" =~ ^[Ss]$ ]]; then
-        log_info "Cambiando shell por defecto para el usuario '$TARGET_USER' a $(which zsh)..."
-        # Verificar si Zsh está en /etc/shells
-        if ! grep "$(which zsh)" /etc/shells &>/dev/null; then
-            log_warn "$(which zsh) no está listado en /etc/shells. Añadiéndolo temporalmente..."
-            echo "$(which zsh)" | tee -a /etc/shells > /dev/null || log_warn "Fallo al añadir Zsh a /etc/shells. chsh puede fallar."
-        fi
-        # chsh requiere que la shell esté en /etc/shells y a menudo no funciona bien con sudo -u para cambiar la propia shell
-        # Es mejor instruir al usuario o ejecutarlo como root si se conoce la contraseña del usuario
-        # La forma más segura es que el usuario lo ejecute manualmente.
-        log_warn "Para usar Zsh como tu shell por defecto, ejecuta ${COLOR_GREEN}manualmente${COLOR_YELLOW} después de que el script termine:"
-        log_warn "${COLOR_GREEN}chsh -s \$(which zsh)${COLOR_YELLOW}"
-        log_warn "Después de ejecutar 'chsh', deberás ${COLOR_RED}cerrar y volver a iniciar sesión${COLOR_YELLOW} para que el cambio surta efecto."
-        # Si realmente queremos automatizarlo con sudo:
-        # log_info "Cambiando shell con sudo chsh..."
-        # chsh -s "$(which zsh)" "$TARGET_USER" || log_warn "Fallo al cambiar la shell por defecto con chsh. Es posible que debas ejecutar 'chsh -s $(which zsh)' manualmente."
-    else
-        log_info "Cambio de shell por defecto a Zsh cancelado por el usuario."
-    fi
-
-
-    # Configurar Oh My Zsh y Powerlevel10k para el usuario
-    OHMYZSH_DIR="/home/$TARGET_USER/.oh-my-zsh"
-    P10K_THEME_DIR="$OHMYZSH_DIR/custom/themes/powerlevel10k"
-    TARGET_USER_HOME="/home/$TARGET_USER"
-
-    log_info "Configurando estructura básica de Oh My Zsh en $TARGET_USER_HOME..."
-    # Usar sudo con la opción -H para establecer HOME correctamente
-    sudo -H -u "$TARGET_USER" mkdir -p "$OHMYZSH_DIR/custom/themes" || log_warn "Fallo al crear directorios de Oh My Zsh."
-    sudo -H -u "$TARGET_USER" mkdir -p "$OHMYZSH_DIR/custom/plugins" || log_warn "Fallo al crear directorios de Oh My Zsh."
-
-    log_info "Clonando tema Powerlevel10k en $P10K_THEME_DIR..."
-    if [ ! -d "$P10K_THEME_DIR" ]; then
-        # Usar sudo con la opción -H para establecer HOME correctamente para git clone
-        if sudo -H -u "$TARGET_USER" git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$P10K_THEME_DIR"; then
-            log_info "Powerlevel10k clonado."
-        else
-            log_warn "Fallo al clonar Powerlevel10k. Verifique la conexión a internet y permisos."
+            log_warn "Fallo en la instalación de Bun."
         fi
     else
-        log_info "Powerlevel10k ya parece clonado."
+        log_info "Instalación de Bun cancelada."
     fi
+fi
 
-    # Copiar archivos de configuración local del usuario
-    log_info "Copiando archivos de configuración local (.zshrc, .p10k.zsh) para el usuario '$TARGET_USER'..."
+log_info "Instalando soporte de virtualización (KVM/QEMU/libvirt)..."
+VIRT_SUPPORT_DETECTED=$(grep -E -c '(vmx|svm)' /proc/cpuinfo)
+if [ "$VIRT_SUPPORT_DETECTED" -gt 0 ]; then
+     log_info "Soporte de virtualización por hardware detectado."
+     sudo dnf install -y @virtualization qemu-kvm-core libvirt virt-install cockpit-machines guestfs-tools
+else
+     log_warn "No se detectó soporte de virtualización por hardware. El rendimiento puede ser limitado."
+     sudo dnf install -y @virtualization qemu-kvm-core libvirt virt-install cockpit-machines guestfs-tools
+fi
+sudo systemctl enable --now libvirtd || log_warn "Fallo al habilitar/iniciar libvirtd."
+log_info "Añadiendo usuario '$TARGET_USER' al grupo libvirt..."
+if ! groups "$TARGET_USER" | grep -q '\blibvirt\b'; then
+    sudo usermod -aG libvirt "$TARGET_USER" || log_warn "Fallo al añadir '$TARGET_USER' a libvirt."
+    log_info "Usuario '$TARGET_USER' añadido a libvirt. Re-logueo necesario."
+else
+    log_info "Usuario '$TARGET_USER' ya pertenece a libvirt."
+fi
+
+log_info "Instalando Docker Engine (v2) desde el repositorio oficial de Docker..."
+# El repo ya fue añadido en SECCIÓN A
+sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker || log_warn "Fallo al habilitar/iniciar docker."
+log_info "Añadiendo usuario '$TARGET_USER' al grupo docker..."
+if ! groups "$TARGET_USER" | grep -q '\bdocker\b'; then
+    sudo groupadd docker &>/dev/null # Crea el grupo si no existe
+    sudo usermod -aG docker "$TARGET_USER" || log_warn "Fallo al añadir '$TARGET_USER' a docker."
+    log_info "Usuario '$TARGET_USER' añadido a docker. Re-logueo necesario para usar 'docker' sin sudo."
+else
+    log_info "Usuario '$TARGET_USER' ya pertenece a docker."
+fi
+
+# #################################################
+# SECCIÓN E: CONFIGURACIÓN DE TERMINAL (ZSH, OH MY ZSH, POWERLEVEL10K)
+# #################################################
+print_message "SECCIÓN E: Configurando Terminal Personalizada"
+
+log_info "Instalando Zsh (si no está ya instalado)..."
+sudo dnf install -y zsh
+
+log_info "Configurando Oh My Zsh y Powerlevel10k para el usuario '$TARGET_USER'..."
+OHMYZSH_DIR="$TARGET_USER_HOME/.oh-my-zsh"
+P10K_THEME_DIR="$OHMYZSH_DIR/custom/themes/powerlevel10k"
+
+if [ ! -d "$OHMYZSH_DIR" ]; then
+    log_info "Instalando Oh My Zsh..."
+    # Ejecutar el instalador de Oh My Zsh como el usuario, no como root
+    # El instalador de Oh My Zsh intentará cambiar la shell por defecto.
+    # Es más seguro que el usuario lo haga manualmente después.
+    sudo -u "$TARGET_USER" sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+    log_info "Oh My Zsh instalado. Puede que necesites re-loguearte para que Zsh sea tu shell por defecto."
+else
+    log_info "Oh My Zsh ya parece estar instalado."
+fi
+
+log_info "Clonando tema Powerlevel10k..."
+if [ ! -d "$P10K_THEME_DIR" ]; then
+    sudo -u "$TARGET_USER" git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$P10K_THEME_DIR" || log_warn "Fallo al clonar Powerlevel10k."
+else
+    log_info "Powerlevel10k ya clonado."
+fi
+
+log_info "Copiando archivos de configuración locales (.zshrc, .p10k.zsh)..."
+# Asumimos que USER_CONFIG_DIR está definido y contiene tus dotfiles
+if [ -n "$USER_CONFIG_DIR" ] && [ -d "$USER_CONFIG_DIR" ]; then
     if [ -f "$USER_CONFIG_DIR/.zshrc" ]; then
         log_info "Copiando .zshrc..."
-        # Hacer copia de seguridad del .zshrc existente si no es un enlace simbólico
         if [ -f "$TARGET_USER_HOME/.zshrc" ] && [ ! -L "$TARGET_USER_HOME/.zshrc" ]; then
-            if sudo mv "$TARGET_USER_HOME/.zshrc" "$TARGET_USER_HOME/.zshrc.bak_$(date +%Y%m%d_%H%M%S)"; then
-                 log_info "Copia de seguridad de .zshrc existente creada."
-            else
-                 log_warn "Fallo al crear copia de seguridad de .zshrc."
-            fi
+            sudo -u "$TARGET_USER" mv "$TARGET_USER_HOME/.zshrc" "$TARGET_USER_HOME/.zshrc.bak_$(date +%Y%m%d_%H%M%S)"
         fi
-        # Copiar y asegurar propietario/grupo correcto
-        if sudo cp "$USER_CONFIG_DIR/.zshrc" "$TARGET_USER_HOME/.zshrc"; then
-            sudo chown "$TARGET_USER:$TARGET_USER" "$TARGET_USER_HOME/.zshrc" || log_warn "Fallo al cambiar propietario/grupo de .zshrc."
-            log_info ".zshrc local copiado."
-        else
-            log_warn "Fallo al copiar .zshrc local."
-        fi
+        sudo -u "$TARGET_USER" cp "$USER_CONFIG_DIR/.zshrc" "$TARGET_USER_HOME/.zshrc"
+        log_info ".zshrc local copiado."
     else
-        log_warn "No se encontró el archivo .zshrc local en $USER_CONFIG_DIR/.zshrc. Saltando copia."
+        log_warn "No se encontró .zshrc en $USER_CONFIG_DIR. Oh My Zsh usará su plantilla."
     fi
 
-     if [ -f "$USER_CONFIG_DIR/.p10k.zsh" ]; then
+    if [ -f "$USER_CONFIG_DIR/.p10k.zsh" ]; then
         log_info "Copiando .p10k.zsh..."
-         # Hacer copia de seguridad del .p10k.zsh existente si no es un enlace simbólico
         if [ -f "$TARGET_USER_HOME/.p10k.zsh" ] && [ ! -L "$TARGET_USER_HOME/.p10k.zsh" ]; then
-            if sudo mv "$TARGET_USER_HOME/.p10k.zsh" "$TARGET_USER_HOME/.p10k.zsh.bak_$(date +%Y%m%d_%H%M%S)"; then
-                log_info "Copia de seguridad de .p10k.zsh existente creada."
-            else
-                 log_warn "Fallo al crear copia de seguridad de .p10k.zsh."
-            fi
+            sudo -u "$TARGET_USER" mv "$TARGET_USER_HOME/.p10k.zsh" "$TARGET_USER_HOME/.p10k.zsh.bak_$(date +%Y%m%d_%H%M%S)"
         fi
-        # Copiar y asegurar propietario/grupo correcto
-        if sudo cp "$USER_CONFIG_DIR/.p10k.zsh" "$TARGET_USER_HOME/.p10k.zsh"; then
-            sudo chown "$TARGET_USER:$TARGET_USER" "$TARGET_USER_HOME/.p10k.zsh" || log_warn "Fallo al cambiar propietario/grupo de .p10k.zsh."
-            log_info ".p10k.zsh local copiado."
-        else
-            log_warn "Fallo al copiar .p10k.zsh local."
-        fi
+        sudo -u "$TARGET_USER" cp "$USER_CONFIG_DIR/.p10k.zsh" "$TARGET_USER_HOME/.p10k.zsh"
+        log_info ".p10k.zsh local copiado."
     else
-        log_warn "No se encontró el archivo .p10k.zsh local en $USER_CONFIG_DIR/.p10k.zsh. Powerlevel10k usará su asistente interactivo la primera vez."
+        log_warn "No se encontró .p10k.zsh en $USER_CONFIG_DIR. Powerlevel10k usará su asistente."
     fi
+else
+    log_warn "La variable USER_CONFIG_DIR no está definida o el directorio no existe. Saltando copia de dotfiles personalizados."
+    log_warn "Oh My Zsh y Powerlevel10k usarán sus configuraciones por defecto o asistentes."
+fi
 
-    log_info "Configuración de terminal completada (requiere que cambies tu shell y reinicies/re-loguees)."
+log_warn "Para cambiar tu shell por defecto a Zsh, ejecuta manualmente: ${COLOR_GREEN}chsh -s \$(which zsh)${COLOR_RESET}"
+log_warn "Después necesitarás ${COLOR_RED}cerrar y volver a iniciar sesión${COLOR_RESET}."
 
+# #################################################
+# SECCIÓN F: INSTALACIÓN DE APLICACIONES (FLATPAK, SNAP, RPM ADICIONALES)
+# #################################################
+print_message "SECCIÓN F: Instalando Aplicaciones Adicionales"
 
-    log_info "Instalando aplicaciones Flatpak (Flathub y Fedora) para el usuario '$TARGET_USER'..."
-    # Usar 'sudo -u' para ejecutar flatpak como el usuario normal con la opción -H
-    # flatpak install --user corre solo para el usuario que ejecuta el comando, no afecta a otros.
-    log_info "Instalando Flatpaks de Flathub..."
-    if ! sudo -H -u "$TARGET_USER" flatpak install --user -y flathub \
-        org.audacityteam.Audacity \
-        cc.arduino.IDE2 \
-        com.bitwarden.desktop \
-        com.microsoft.Edge \
-        com.obsproject.Studio \
-        com.spotify.Client \
-        org.onlyoffice.desktopeditors \
-        org.freedesktop.Platform \
-        org.gnome.Platform \
-        org.kde.Platform \
-        org.freedesktop.Platform.GL.default \
-        org.freedesktop.Platform.VAAPI.Intel \
-        org.freedesktop.Platform.openh264; then
-        log_warn "Falló la instalación de una o más aplicaciones Flatpak de Flathub."
-    fi
+log_info "Instalando Wine (RPM, ya debería estar de la sección C)..."
+# Ya instalado arriba, pero se puede verificar
+sudo dnf install -y wine winetricks
 
+log_info "Instalando Visual Studio Code (RPM, ya debería estar)..."
+# Ya instalado arriba
+sudo dnf install -y code
 
-    log_info "Instalando Flatpaks de Fedora remote..."
-     if ! sudo -H -u "$TARGET_USER" flatpak install --user -y fedora \
-        org.eclipse.Java \
-        com.github.tchx84.Flatseal \
-        org.fedoraproject.Platform \
-        org.gtk.Gtk3theme.Breeze; then
-        log_warn "Falló la instalación de una o más aplicaciones Flatpak de Fedora."
-     fi
+log_info "Instalando aplicaciones Flatpak de Flathub..."
+# Usar 'sudo -u' para instalar como usuario es generalmente más seguro para Flatpaks si no necesitas acceso de root para la app.
+# Si prefieres instalación a nivel de sistema, quita 'sudo -u "$TARGET_USER"' y '--user'.
+sudo -u "$TARGET_USER" flatpak install -y --noninteractive flathub \
+    com.spotify.Client \
+    com.obsproject.Studio \
+    org.onlyoffice.desktopeditors \
+    com.usebottles.bottles \
+    com.microsoft.Edge \
+    org.audacityteam.Audacity \
+    cc.arduino.IDE2 \
+    com.bitwarden.desktop \
+    it.mijorus.gearlever \
+    org.freedesktop.Platform.GL.default \
+    org.freedesktop.Platform.VAAPI.Intel \
+    org.freedesktop.Platform.openh264 \
+    org.kde.Platform # Runtimes comunes
 
-    # Instalar AppImage manager (Gearlever) vía Flatpak
-    log_info "Instalando Gearlever (AppImage Manager) vía Flatpak para el usuario '$TARGET_USER'..."
-    if ! sudo -H -u "$TARGET_USER" flatpak install --user -y flathub it.mijorus.gearlever; then
-         log_warn "Falló la instalación de Gearlever (Flatpak)."
-    fi
-    log_info "Aplicaciones Flatpak instaladas."
+log_info "Instalando Flatpaks del repositorio Fedora..."
+sudo -u "$TARGET_USER" flatpak install -y --noninteractive fedora \
+    org.eclipse.Java \
+    com.github.tchx84.Flatseal \
+    org.gtk.Gtk3theme.Breeze # Y otros que necesites
 
+log_info "Instalando aplicaciones Snap..."
+if systemctl is-active --quiet snapd; then
+    # --classic permite a las snaps tener más acceso, necesario para algunas como Android Studio
+    sudo snap install android-studio --classic || log_warn "Fallo al instalar Android Studio (snap)."
+    sudo snap install core22 || log_warn "Falló la instalación de core22 (snap base)."
+    # Añade aquí otras aplicaciones Snap que necesites
+else
+    log_warn "Servicio snapd no activo. Saltando instalación de snaps."
+fi
 
-    log_info "Instalando aplicaciones Snap..."
-    # Asegurarse de que snapd está activo antes de instalar snaps
-    if ! systemctl is-active --quiet snapd; then
-         log_error "El servicio snapd no está activo. No se pueden instalar aplicaciones Snap."
-         log_warn "Intenta iniciar snapd manualmente con 'sudo systemctl start snapd' y ejecuta esta fase de nuevo."
-    else
-        log_info "Instalando snaps..."
-        # snap install ... || log_warn "Fallo al instalar snap." # Set -e no funciona bien con snap install
-        snap install android-studio --classic || log_warn "Falló la instalación de Android Studio (snap)."
-        snap install core22 || log_warn "Falló la instalación de core22 (snap base)."
-        log_info "Aplicaciones Snap instaladas (si snapd está activo y las instalaciones tuvieron éxito)."
-    fi
+# #################################################
+# FINALIZACIÓN
+# #################################################
+print_message "Finalizando y Limpiando"
 
+log_info "Limpiando caché de DNF..."
+sudo dnf clean all
 
-    log_info "=== Fin de la Fase 3 ==="
-    log_warn "La configuración de terminal y la instalación de aplicaciones han finalizado."
-    log_warn "Ahora puedes ejecutar la configuración opcional de Secure Boot si lo deseas."
-    log_warn "Ejecuta este script con el argumento 'phase4':"
-    log_warn "sudo ./setup.sh phase4"
-    log_warn "Recuerda ${COLOR_RED}cerrar y volver a iniciar sesión${COLOR_YELLOW} para que todos los cambios (grupos, PATH, Zsh, apps) surtan efecto."
-    exit 0
-}
+log_info "Actualizando GRUB (importante si se instaló un nuevo kernel)..."
+if [ -d /sys/firmware/efi ]; then
+    sudo grub2-mkconfig -o /boot/efi/EFI/fedora/grub.cfg
+else
+    sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+fi
 
-phase4_secure_boot() {
-    log_info "=== Fase 4: Configuración Opcional de Secure Boot ==="
-    log_warn "${COLOR_RED}¡ATENCIÓN! Esta fase requiere INTERACCIÓN MANUAL después del próximo reinicio.${COLOR_RESET}"
-    log_warn "${COLOR_RED}Lee cuidadosamente las instrucciones que se mostrarán.${COLOR_RESET}"
+print_message "¡Script de post-instalación completado!"
+log_warn "Algunos cambios como la pertenencia a nuevos grupos (docker, libvirt), variables de entorno (GOPATH, NPM_PATH)"
+log_warn "y el cambio de shell a Zsh requieren que ${COLOR_RED}CIERRES SESIÓN Y VUELVAS A INICIARLA${COLOR_RESET}."
+log_warn "Un ${COLOR_RED}REINICIO COMPLETO${COLOR_RESET} es altamente recomendable para aplicar los cambios de kernel y drivers NVIDIA."
 
-    check_root # Asegurarse de que se ejecuta con root.
+echo ""
+read -r -p "¿Desea reiniciar el sistema ahora? (s/N): " respuesta
+if [[ "$respuesta" =~ ^([sS][iI]|[sS]|[yY][eE][sS]|[yY])$ ]]; then
+    log_info "Reiniciando el sistema..."
+    sudo reboot
+else
+    log_info "No se reiniciará automáticamente. Por favor, reinicia manualmente cuando estés listo."
+fi
 
-    # 10. Validación de acción peligrosa: Configuración de Secure Boot
-    log_warn "La siguiente acción preparará tu sistema para Secure Boot."
-    log_warn "Esto generará una clave MOK y la importará en el firmware UEFI."
-    read -r -p "¿Desea proceder con la configuración de Secure Boot? [S/n]: " confirm_secureboot
-    confirm_secureboot=${confirm_secureboot:-S}
-
-    if [[ "$confirm_secureboot" =~ ^[Ss]$ ]]; then
-        log_info "Instalando herramientas de Secure Boot..."
-        # dnf install -y kmodtool akmods mokutil openssl || log_error "Fallo al instalar herramientas de Secure Boot." # Set -e
-        dnf install -y kmodtool akmods mokutil openssl
-
-        log_info "Generando clave MOK para firmar módulos del kernel..."
-        # La clave se genera por defecto en /etc/pki/akmods.
-        # kmodgenca -a || log_error "Fallo al generar la clave MOK. Abortando Secure Boot setup." # Set -e
-        kmodgenca -a
-
-        log_info "Importando la clave pública (.der) en la lista de claves MOK..."
-        log_warn "${COLOR_RED}Se te pedirá que ingreses una CONTRASEÑA para enrollar la clave. ¡Anótala! La necesitarás después de reiniciar.${COLOR_RESET}"
-        # mokutil --import /etc/pki/akmods/certs/public_key.der || log_error "Error al importar la clave MOK. Abortando Secure Boot setup." # Set -e
-        # Ejecutar interactivo para la contraseña
-        if mokutil --import /etc/pki/akmods/certs/public_key.der; then
-             log_info "Comando de importación de clave MOK ejecutado con éxito."
-        else
-             log_error "Fallo al ejecutar el comando 'mokutil --import'. Verifica si Secure Boot está habilitado en BIOS/UEFI y si tienes permisos."
-             exit 1 # Salir explícitamente en caso de fallo crítico
-        fi
-
-        # 11. Instrucciones CRÍTICAS para el usuario (mejoradas para claridad)
-        log_warn "${COLOR_RED}=== PASOS MANUALES REQUERIDOS DESPUÉS DEL REINICIO ===${COLOR_RESET}"
-        log_warn "La importación de la clave NO está completa todavía."
-        log_warn "Debes INTERACTUAR MANUALMENTE con la pantalla de MOK Management al reiniciar."
-        log_warn "${COLOR_YELLOW}1. ${COLOR_RESET} Reinicia tu sistema ahora: ${COLOR_GREEN}sudo systemctl reboot${COLOR_RESET}"
-        log_warn "${COLOR_YELLOW}2. ${COLOR_RESET} Justo antes de que Fedora inicie, verás una pantalla (a menudo azul/negra) de ${COLOR_RED}'MOK Management'${COLOR_RESET} o similar (puede variar según tu firmware UEFI)."
-        log_warn "${COLOR_YELLOW}3. ${COLOR_RESET} Selecciona ${COLOR_GREEN}'Enroll MOK'${COLOR_RESET} (o similar)."
-        log_warn "${COLOR_YELLOW}4. ${COLOR_RESET} Sigue las indicaciones, selecciona ${COLOR_GREEN}'Continue'${COLOR_RESET} o confirma."
-        log_warn "${COLOR_YELLOW}5. ${COLOR_RESET} Se te pedirá la ${COLOR_RED}CONTRASEÑA${COLOR_RESET} que introdujiste cuando ejecutaste el comando 'mokutil --import' anteriormente."
-        log_warn "${COLOR_RED}¡ADVERTENCIA: La distribución del teclado en esta pantalla a menudo es QWERTY!${COLOR_RESET}"
-        log_warn "${COLOR_YELLOW}6. ${COLOR_RESET} Después de ingresar la contraseña correctamente, confirma la inscripción."
-        log_warn "${COLOR_YELLOW}7. ${COLOR_RESET} El sistema te pedirá que reinicies de nuevo. Hazlo."
-        log_info "Una vez que hayas completado estos pasos manuales, tu clave personalizada estará inscrita y los módulos del kernel firmados localmente (como los drivers Nvidia instalados con akmod) funcionarán con Secure Boot habilitado."
-
-        log_info "=== Fin de la Fase 4 ==="
-        log_warn "Ahora debes ${COLOR_RED}REINICIAR${COLOR_YELLOW} para completar el proceso de Secure Boot manualmente."
-        log_warn "Después del reinicio y la interacción con MOK Management, tu setup estará casi completo."
-        # No salimos automáticamente aquí, ya que el usuario necesita leer las instrucciones cruciales.
-        # Sugerimos el comando de reinicio, pero el usuario debe ejecutarlo.
-    else
-        log_info "Configuración de Secure Boot cancelada por el usuario."
-        log_info "=== Fin de la Fase 4 ==="
-    fi
-
-    # No hay exit 0 aquí, ya que la fase instruye al usuario a reiniciar manualmente.
-}
-
-
-# --- Lógica principal del script ---
-
-# Ejecutar validaciones iniciales antes de cualquier fase
-check_dependencies
-check_config_files
-
-# Procesar el argumento de la línea de comandos
-case "${1:-}" in # Usamos ${1:-} para manejar el caso sin argumentos
-    phase1)
-        phase1_initial_setup
-        ;;
-    phase2)
-        phase2_system_dev_base
-        ;;
-    phase3)
-        phase3_terminal_apps
-        ;;
-    phase4)
-        phase4_secure_boot
-        ;;
-    all)
-        log_warn "Has solicitado ver la secuencia de ejecución completa."
-        log_warn "Nota: Este modo NO ejecuta todas las fases automáticamente de principio a fin."
-        log_warn "Debe ejecutar cada fase por separado con 'sudo ./setup.sh <fase>' y realizar los reinicios/re-logueos cuando se le indique."
-        log_info "${COLOR_GREEN}Secuencia de ejecución recomendada:${COLOR_RESET}"
-        log_info "1. ${COLOR_YELLOW}sudo ./setup.sh phase1${COLOR_RESET} (Configuración inicial, repos, herramientas básicas, firmware)"
-        log_warn "   -> ${COLOR_RED}¡IMPORTANTE! REINICIAR antes de pasar a la fase 2.${COLOR_RESET}"
-        log_info "2. ${COLOR_YELLOW}sudo ./setup.sh phase2${COLOR_RESET} (Base sistema, drivers, multimedia, entornos de desarrollo)"
-        log_warn "   -> ${COLOR_RED}¡IMPORTANTE! Cerrar/Iniciar sesión (o REINICIAR) antes de pasar a la fase 3 para aplicar cambios de grupo/PATH.${COLOR_RESET}"
-        log_info "3. ${COLOR_YELLOW}sudo ./setup.sh phase3${COLOR_RESET} (Configuración de Terminal, Apps Flatpak/Snap/AppImage)"
-        log_warn "   -> ${COLOR_RED}¡IMPORTANTE! Cerrar/Iniciar sesión (o REINICIAR) para que la nueva shell y las aplicaciones estén disponibles.${COLOR_RESET}"
-        log_info "4. ${COLOR_YELLOW}sudo ./setup.sh phase4${COLOR_RESET} (Configuración OPCIONAL de Secure Boot para módulos firmados localmente)"
-        log_warn "   -> ${COLOR_RED}¡IMPORTANTE! REINICIAR INMEDIATAMENTE y completar los pasos manuales en MOK Management.${COLOR_RESET}"
-        log_info "Consulta el archivo de log en $LOGFILE para detalles de la ejecución."
-        ;;
-    *)
-        log_error "Uso: sudo ./setup.sh <fase>"
-        log_warn "${COLOR_YELLOW}Fases disponibles:${COLOR_RESET}"
-        log_warn "  ${COLOR_GREEN}phase1${COLOR_RESET}: Configuración inicial, repositorios, herramientas básicas, firmware. ${COLOR_RED}Requiere REINICIO al finalizar.${COLOR_RESET}"
-        log_warn "  ${COLOR_GREEN}phase2${COLOR_RESET}: Soporte del sistema (drivers, multimedia), entornos de desarrollo (virtualización, docker, lenguajes). ${COLOR_RED}Requiere cerrar/iniciar sesión (o REINICIAR) al finalizar.${COLOR_RESET}"
-        log_warn "  ${COLOR_GREEN}phase3${COLOR_RESET}: Configuración de terminal (Zsh, P10k), instalación de aplicaciones (Flatpak, Snap, AppImage). ${COLOR_RED}Requiere cerrar/iniciar sesión (o REINICIAR) para ver cambios.${COLOR_RESET}"
-        log_warn "  ${COLOR_GREEN}phase4${COLOR_RESET}: Configuración OPCIONAL de Secure Boot. ${COLOR_RED}Requiere REINICIAR y pasos manuales en MOK Management al finalizar.${COLOR_RESET}"
-        log_warn ""
-        log_warn "${COLOR_YELLOW}Para ver la secuencia completa y las instrucciones detalladas, usa:${COLOR_RESET} ${COLOR_GREEN}./setup.sh all${COLOR_RESET}"
-        exit 1
-        ;;
-esac
-
-# Mensaje final si el script no salió por un error o un exit explícito en una fase.
-# Esto solo debería ocurrir si la fase 4 se ejecutó sin errores o si se usó el argumento 'all'.
-log_info "Script de setup finalizado. Consulta el archivo de log en $LOGFILE para más detalles."
-log_info "¡Recuerda los pasos de ${COLOR_RED}REINICIO o CIERRE/INICIO DE SESIÓN${COLOR_RESET} si aplicaste fases 1, 2 o 3!"
-
-# --- Notas Adicionales ---
-# - Considera usar 'dialog' o 'whiptail' para menús y prompts más amigables.
-# - Revisa el manejo de defaultyes=True en dnf.conf, puede ser arriesgado.
-# - Para una instalación más segura de Bun, descarga el script, revísalo y ejecútalo localmente.
-# - Implementa la adición de la clave GPG para el repositorio Terra en lugar de --nogpgcheck.
-# - Considera usar ShellCheck (shellcheck.net) para analizar el script y encontrar posibles errores o malas prácticas.
+exit 0
