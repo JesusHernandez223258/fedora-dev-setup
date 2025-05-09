@@ -14,7 +14,8 @@
 # --- Variables de Configuración (Ajusta según sea necesario) ---
 TARGET_USER=$(logname) # O el usuario principal si se ejecuta como root desde el inicio
 TARGET_USER_HOME="/home/$TARGET_USER"
-# USER_CONFIG_DIR="$TARGET_USER_HOME/dotfiles" # Descomenta y ajusta si tienes tus dotfiles en una carpeta específica
+USER_CONFIG_DIR="$(pwd)/config/user" # Ruta al directorio de configuración del usuario
+DNF_CONFIG_DIR="$(pwd)/config/dnf"  # Ruta al directorio de configuración de DNF
 
 # --- Funciones de Ayuda ---
 print_message() {
@@ -54,17 +55,13 @@ log_info "Archivo de perfil detectado/seleccionado: $PROFILE_FILE"
 # #################################################
 print_message "SECCIÓN A: Optimizando DNF, Configurando Repositorios y Actualización Inicial"
 
-log_info "Optimizando configuración de DNF..."
-if ! grep -q "fastestmirror=True" /etc/dnf/dnf.conf; then
-    echo 'fastestmirror=True' | sudo tee -a /etc/dnf/dnf.conf
+log_info "Copiando configuración de DNF..."
+if [ -f "$DNF_CONFIG_DIR/dnf.conf" ]; then
+    sudo cp "$DNF_CONFIG_DIR/dnf.conf" /etc/dnf/dnf.conf
+    log_info "Archivo dnf.conf copiado a /etc/dnf/dnf.conf."
+else
+    log_warn "No se encontró dnf.conf en $DNF_CONFIG_DIR. Usando configuración actual de DNF."
 fi
-if ! grep -q "max_parallel_downloads=10" /etc/dnf/dnf.conf; then
-    echo 'max_parallel_downloads=10' | sudo tee -a /etc/dnf/dnf.conf
-fi
-# Descomentar con precaución:
-# if ! grep -q "defaultyes=True" /etc/dnf/dnf.conf; then
-#     echo 'defaultyes=True' | sudo tee -a /etc/dnf/dnf.conf # Acepta automáticamente todas las preguntas de DNF
-# fi
 
 log_info "Habilitando Repositorios RPM Fusion (Free y Nonfree)..."
 sudo dnf install -y \
@@ -279,8 +276,7 @@ else
 fi
 
 log_info "Copiando archivos de configuración locales (.zshrc, .p10k.zsh)..."
-# Asumimos que USER_CONFIG_DIR está definido y contiene tus dotfiles
-if [ -n "$USER_CONFIG_DIR" ] && [ -d "$USER_CONFIG_DIR" ]; then
+if [ -d "$USER_CONFIG_DIR" ]; then
     if [ -f "$USER_CONFIG_DIR/.zshrc" ]; then
         log_info "Copiando .zshrc..."
         if [ -f "$TARGET_USER_HOME/.zshrc" ] && [ ! -L "$TARGET_USER_HOME/.zshrc" ]; then
@@ -303,8 +299,7 @@ if [ -n "$USER_CONFIG_DIR" ] && [ -d "$USER_CONFIG_DIR" ]; then
         log_warn "No se encontró .p10k.zsh en $USER_CONFIG_DIR. Powerlevel10k usará su asistente."
     fi
 else
-    log_warn "La variable USER_CONFIG_DIR no está definida o el directorio no existe. Saltando copia de dotfiles personalizados."
-    log_warn "Oh My Zsh y Powerlevel10k usarán sus configuraciones por defecto o asistentes."
+    log_warn "El directorio $USER_CONFIG_DIR no existe. Saltando copia de archivos de configuración."
 fi
 
 log_warn "Para cambiar tu shell por defecto a Zsh, ejecuta manualmente: ${COLOR_GREEN}chsh -s \$(which zsh)${COLOR_RESET}"
