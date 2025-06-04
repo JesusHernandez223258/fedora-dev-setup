@@ -1,102 +1,342 @@
 #!/bin/bash
 
-set -e
+set -e # Exit immediately if a command exits with a non-zero status.
 
-# Actualizar e instalar repositorios
+echo ">>> Starting Full Minimal Server + i3 Setup Script <<<"
+
+# --- SECCIÓN 1: PREPARACIÓN DEL SISTEMA Y UTILIDADES BÁSICAS ---
+echo ""
+echo ">>> SECTION 1: SYSTEM PREPARATION & BASIC UTILITIES <<<"
+echo "---------------------------------------------------------"
+
+# 1.1. System Update and Upgrade
+echo ">>> Updating and upgrading system packages..."
 sudo apt update
-sudo apt install -y software-properties-common
+sudo apt upgrade -y
+sudo apt full-upgrade -y # More thorough upgrade
+sudo apt install -y software-properties-common # For add-apt-repository
+
+# 1.2. Ensure essential repositories are enabled (usually default on server)
+echo ">>> Ensuring essential repositories are enabled..."
 sudo add-apt-repository -y main
 sudo add-apt-repository -y universe
 sudo add-apt-repository -y restricted
 sudo add-apt-repository -y multiverse
 sudo apt update
-sudo apt upgrade -y
-sudo apt full-upgrade -y
 
-# Códecs y multimedia
+# 1.3. Codecs and Multimedia
+echo ">>> Installing multimedia codecs..."
 sudo apt install -y ubuntu-restricted-extras
 sudo apt install -y gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
     gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
     gstreamer1.0-libav ffmpeg
 
-# Snap y Flatpak
+# 1.4. Snap and Flatpak
+echo ">>> Setting up Snap and Flatpak..."
 sudo apt install -y snapd
 sudo systemctl enable --now snapd.socket
+echo "--- Testing Snap with hello-world..."
 sudo snap install hello-world
-hello-world
-sudo apt install -y flatpak gnome-software-plugin-flatpak
+hello-world # Run the test
+sudo apt install -y flatpak gnome-software-plugin-flatpak # gnome-software-plugin-flatpak might not be needed for minimal server
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
-# Redes y Bluetooth
+# 1.5. Networking and Bluetooth
+echo ">>> Installing networking and Bluetooth tools..."
 sudo apt install -y network-manager wireless-tools wpasupplicant bluez
 sudo systemctl enable --now bluetooth.service
 
-# Impresión
+# 1.6. Printing (CUPS) - Optional for a minimal server, but in your list
+echo ">>> Installing printing services (CUPS)..."
 sudo apt install -y cups hplip
 sudo systemctl enable --now cups
 sudo usermod -aG lpadmin $USER
 
-# Compresión
+# 1.7. Compression Utilities
+echo ">>> Installing compression utilities..."
 sudo apt install -y zip unzip p7zip-full rar unrar xz-utils tar gzip bzip2
 
-# Desarrollo y herramientas básicas
+# 1.8. Development and Basic Build Tools
+echo ">>> Installing development tools..."
 sudo apt install -y build-essential cmake git curl wget \
     libssl-dev libffi-dev libbz2-dev libreadline-dev libsqlite3-dev zlib1g-dev
-sudo apt --fix-broken install
+sudo apt --fix-broken install -y # Attempt to fix any broken dependencies
 
-# Diagnóstico y limpieza
+# 1.9. Diagnostics and System Utilities
+echo ">>> Installing diagnostic and system utilities..."
 sudo apt install -y bleachbit ncdu htop net-tools lsof tree glances
 sudo apt install -y ufw
+echo "--- Enabling UFW (Firewall) and allowing OpenSSH..."
 sudo ufw enable
 sudo ufw allow OpenSSH
+echo "--- Testing network connectivity..."
 ping -c 4 archive.ubuntu.com
 
-# ZRAM y Zswap
+
+# --- SECCIÓN 2: OPTIMIZACIONES DE MEMORIA ---
+echo ""
+echo ">>> SECTION 2: MEMORY OPTIMIZATIONS <<<"
+echo "---------------------------------------"
+
+# 2.1. ZRAM and Zswap
+echo ">>> Setting up ZRAM..."
 sudo apt install -y zram-tools
 
-echo "# Edita ALGO=zstd y PERCENTAGE=50 en el siguiente archivo"
-sleep 2
+echo "---------------------------------------------------------------------"
+echo "# INFO: You will now be prompted to edit /etc/default/zramswap."
+echo "# Consider setting ALGO=zstd and PERCENTAGE=50 for good performance."
+echo "---------------------------------------------------------------------"
+sleep 3
 sudo nano /etc/default/zramswap
 sudo systemctl restart zramswap
 
+echo ">>> Checking Zswap status..."
 if [[ "$(cat /sys/module/zswap/parameters/enabled)" != "Y" ]]; then
-  echo "# Añade zswap.enabled=1 a GRUB_CMDLINE_LINUX_DEFAULT"
-  sleep 2
+  echo "---------------------------------------------------------------------"
+  echo "# INFO: Zswap is not enabled. You will be prompted to edit GRUB."
+  echo "# Add 'zswap.enabled=1' to the GRUB_CMDLINE_LINUX_DEFAULT line."
+  echo "# Example: GRUB_CMDLINE_LINUX_DEFAULT=\"quiet splash zswap.enabled=1\""
+  echo "---------------------------------------------------------------------"
+  sleep 3
   sudo nano /etc/default/grub
   sudo update-grub
-  echo "Reinicia el sistema para aplicar Zswap"
-  read -p "Presiona Enter para reiniciar..."
-  sudo reboot
+  echo "---------------------------------------------------------------------"
+  echo "IMPORTANT: A REBOOT is required to apply Zswap settings."
+  echo "The script will continue, but remember to reboot later if you don't reboot now."
+  echo "---------------------------------------------------------------------"
+  read -p "Do you want to reboot now to apply Zswap? (y/N): " reboot_choice
+  if [[ "$reboot_choice" =~ ^[Yy]$ ]]; then
+    echo "Rebooting..."
+    sudo reboot
+    exit 0 # Exit script after reboot, user will need to re-run or continue manually
+  fi
 fi
 
-# Swappiness
-cat /proc/sys/vm/swappiness
+# 2.2. Swappiness
+echo ">>> Current swappiness: $(cat /proc/sys/vm/swappiness)"
+echo ">>> Setting swappiness to 10..."
 sudo sysctl vm.swappiness=10
+echo "---------------------------------------------------------------------"
+echo "# INFO: To make swappiness persistent, add 'vm.swappiness=10' "
+echo "# to the end of /etc/sysctl.conf. You will be prompted to edit it."
+echo "---------------------------------------------------------------------"
+sleep 3
+sudo nano /etc/sysctl.conf # Consider adding 'vm.swappiness=10' if not present
 
-echo "# Añade vm.swappiness=10 al final del archivo"
-sleep 2
-sudo nano /etc/sysctl.conf
-
-# vfs_cache_pressure
+# 2.3. VFS Cache Pressure
+echo ">>> Setting VFS cache pressure to 200..."
 sudo sysctl -w vm.vfs_cache_pressure=200
-echo "# Añade vm.vfs_cache_pressure=200 al final del archivo"
-sleep 2
-sudo nano /etc/sysctl.conf
+echo "---------------------------------------------------------------------"
+echo "# INFO: To make VFS cache pressure persistent, add 'vm.vfs_cache_pressure=200' "
+echo "# to the end of /etc/sysctl.conf. You will be prompted to edit it."
+echo "---------------------------------------------------------------------"
+sleep 3
+sudo nano /etc/sysctl.conf # Consider adding 'vm.vfs_cache_pressure=200' if not present
 
-# Limpiar caché
+
+# --- SECCIÓN 3: I3 DESKTOP ENVIRONMENT SETUP ---
+echo ""
+echo ">>> SECTION 3: i3 DESKTOP ENVIRONMENT SETUP <<<"
+echo "-----------------------------------------------"
+
+# 3.1. Install Xorg (X Window System) - The foundation for GUI
+echo ">>> Installing Xorg..."
+sudo apt install -y xorg xinit xterm # xterm as a fallback terminal
+
+# 3.2. Install i3 Window Manager and related tools
+echo ">>> Installing i3 Window Manager and basic tools..."
+sudo apt install -y i3 i3lock i3status suckless-tools # suckless-tools includes dmenu
+
+# 3.3. Install Brave Browser
+echo ">>> Installing Brave Browser..."
+# curl is already installed from dev tools
+# sudo apt install -y apt-transport-https gnupg # Ensure these are present
+sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main"|sudo tee /etc/apt/sources.list.d/brave-browser-release.list
+sudo apt update
+sudo apt install -y brave-browser
+
+# 3.4. Install Essential Companion Applications for i3
+echo ">>> Installing essential companion applications for i3..."
+sudo apt install -y \
+    alacritty \
+    polybar \
+    picom \
+    rofi \
+    feh \
+    thunar \
+    brightnessctl \
+    dunst \
+    lxappearance \
+    papirus-icon-theme \
+    yad \
+    unzip \
+    fonts-font-awesome \
+    fonts-ubuntu-mono-nerd-font # Common Nerd Font for icons
+
+# Install other Nerd Fonts if needed (example: FiraCode)
+# echo ">>> Optionally install other Nerd Fonts (e.g., FiraCode)..."
+# sudo apt install -y fonts-firacode
+
+# Refresh font cache
+echo ">>> Refreshing font cache..."
+fc-cache -fv
+
+# 3.5. Install a Login Manager (LightDM is a good lightweight choice)
+echo ">>> Installing LightDM Login Manager..."
+sudo apt install -y lightdm lightdm-gtk-greeter
+sudo systemctl enable lightdm
+# If you had another display manager, you might need: sudo dpkg-reconfigure lightdm
+
+# 3.6. Fetch and Apply Your Configuration Files
+echo ">>> Fetching and applying your custom configuration files..."
+CONFIG_REPO="https://github.com/hectoresp/config.git"
+TEMP_CONFIG_DIR="$HOME/i3_custom_config_temp"
+
+if [ -d "$TEMP_CONFIG_DIR" ]; then
+    echo "--- Temporary config directory already exists. Removing it."
+    rm -rf "$TEMP_CONFIG_DIR"
+fi
+git clone "$CONFIG_REPO" "$TEMP_CONFIG_DIR"
+
+# Create necessary .config subdirectories if they don't exist
+mkdir -p "$HOME/.config/i3"
+mkdir -p "$HOME/.config/polybar"
+mkdir -p "$HOME/.config/picom"
+mkdir -p "$HOME/.config/alacritty"
+mkdir -p "$HOME/.config/rofi" # If you have a rofi config
+mkdir -p "$HOME/.config/dunst" # If you have a dunst config
+mkdir -p "$HOME/.config/scripts" # For custom scripts
+
+# Copy configuration files
+echo "--- Copying i3 config..."
+if [ -d "$TEMP_CONFIG_DIR/config/i3" ]; then
+    cp -R "$TEMP_CONFIG_DIR/config/i3/"* "$HOME/.config/i3/"
+else
+    echo "WARNING: i3 config not found in cloned repo at config/i3/"
+fi
+
+echo "--- Copying Polybar config..."
+if [ -d "$TEMP_CONFIG_DIR/config/polybar" ]; then
+    cp -R "$TEMP_CONFIG_DIR/config/polybar/"* "$HOME/.config/polybar/"
+else
+    echo "WARNING: Polybar config not found in cloned repo at config/polybar/"
+fi
+
+echo "--- Copying Picom config..."
+if [ -d "$TEMP_CONFIG_DIR/config/picom" ]; then
+    cp -R "$TEMP_CONFIG_DIR/config/picom/"* "$HOME/.config/picom/"
+else
+    echo "WARNING: Picom config not found in cloned repo at config/picom/"
+fi
+
+echo "--- Copying Alacritty config..."
+if [ -d "$TEMP_CONFIG_DIR/config/alacritty" ]; then
+    cp -R "$TEMP_CONFIG_DIR/config/alacritty/"* "$HOME/.config/alacritty/"
+else
+    echo "WARNING: Alacritty config not found in cloned repo at config/alacritty/"
+fi
+
+echo "--- Copying custom scripts..."
+if [ -d "$TEMP_CONFIG_DIR/config/scripts" ]; then
+    cp -R "$TEMP_CONFIG_DIR/config/scripts/"* "$HOME/.config/scripts/"
+    # Make scripts executable
+    if [ -d "$HOME/.config/scripts" ]; then
+        echo "--- Making custom scripts executable..."
+        chmod +x "$HOME/.config/scripts/"*.sh
+    fi
+else
+    echo "WARNING: Custom scripts directory not found in cloned repo at config/scripts/"
+fi
+
+# Make Polybar launch script executable (assuming it's in your Polybar config dir)
+if [ -f "$HOME/.config/polybar/launch.sh" ]; then
+    echo "--- Making Polybar launch script executable..."
+    chmod +x "$HOME/.config/polybar/launch.sh"
+fi
+
+# Handle Wallpaper
+echo "--- Setting up wallpaper..."
+mkdir -p "$HOME/Pictures"
+if [ -f "$TEMP_CONFIG_DIR/wallpaper2.png" ]; then
+    cp "$TEMP_CONFIG_DIR/wallpaper2.png" "$HOME/Pictures/wallpaper2.png"
+    echo "Wallpaper copied to ~/Pictures/wallpaper2.png"
+    echo "Ensure your i3 config has: exec_always --no-startup-id feh --bg-fill ~/Pictures/wallpaper2.png"
+else
+    echo "WARNING: wallpaper2.png not found in the root of the cloned repo. Please set your wallpaper manually or add it to your repo."
+fi
+
+# Clean up temporary config directory
+echo "--- Cleaning up temporary config directory..."
+rm -rf "$TEMP_CONFIG_DIR"
+
+
+# --- SECCIÓN 4: LIMPIEZA FINAL Y GESTIÓN DE SERVICIOS ---
+echo ""
+echo ">>> SECTION 4: FINAL CLEANUP & SERVICE MANAGEMENT <<<"
+echo "-----------------------------------------------------"
+
+# 4.1. Limpiar caché de paquetes
+echo ">>> Clearing package cache..."
 sudo sync
-sudo sysctl -w vm.drop_caches=3
+sudo sysctl -w vm.drop_caches=3 # Clear pagecache, dentries and inodes
 
-# Servicios
+# 4.2. Listar servicios habilitados (para revisión manual)
+echo ">>> Listing enabled services (for your review):"
 systemctl list-unit-files --type=service --state=enabled
+echo "---------------------------------------------------------------------"
+echo "# INFO: Review the list above. You might want to disable unnecessary services."
+echo "# Example: To disable CUPS (printing), you would run: sudo systemctl disable cups.service"
+echo "---------------------------------------------------------------------"
+read -p "Do you want to disable CUPS (printing service) now? (y/N): " disable_cups
+if [[ "$disable_cups" =~ ^[Yy]$ ]]; then
+  echo "--- Disabling CUPS..."
+  sudo systemctl disable cups.service
+  sudo systemctl stop cups.service # Also stop it if running
+fi
 
-# Deshabilitar ejemplo
-sudo systemctl disable cups
+# 4.3. Purgar paquetes innecesarios (¡¡CUIDADO CON ESTO!!)
+echo "---------------------------------------------------------------------"
+echo "# WARNING: The next step will attempt to purge 'paquete1' and 'paquete2'."
+echo "# MODIFY THE SCRIPT if these are not the packages you want to remove."
+echo "# This is a placeholder. Be very careful with 'apt purge'."
+echo "---------------------------------------------------------------------"
+#read -p "Do you want to proceed with purging 'paquete1 paquete2'? (y/N): " purge_choice
+#if [[ "$purge_choice" =~ ^[Yy]$ ]]; then
+#  echo "--- Purging specified packages (replace with actual packages)..."
+#  sudo apt purge -y paquete1 paquete2 || echo "Skipping purge of example packages or they were not found."
+#fi
+echo "--- Skipping example package purge. Please do this manually if needed."
 
-# Purgar paquetes basura (reemplaza "paquete1 paquete2" con los reales)
-sudo apt purge -y paquete1 paquete2 || true
+
+echo ">>> Removing unused dependencies and cleaning apt cache..."
 sudo apt autoremove -y
 sudo apt clean
 
-# Xorg e i3 básico
-sudo apt install -y xserver-xorg xinit xterm
+
+# --- SECCIÓN 5: INSTRUCCIONES FINALES ---
+echo ""
+echo ""
+echo ">>> Installation and Configuration Complete! <<<"
+echo "======================================================="
+echo ""
+echo "Next Steps:"
+echo "1. It's highly recommended to REBOOT your system now: sudo reboot"
+echo "2. At the LightDM login screen, look for a session switcher icon (often a gear or logo)."
+echo "3. Select 'i3' from the session list BEFORE entering your password and logging in."
+echo "4. The first time i3 starts, it might ask to generate a default config. You can say YES (it will likely be overwritten if paths match)."
+echo "   It will also ask for a modifier key (Mod). Win key (Mod4) is common."
+echo "5. Verify your i3 config (~/.config/i3/config) correctly auto-starts Polybar, Picom, feh (wallpaper), etc."
+echo "   Example lines to have in your i3 config:"
+echo "   exec_always --no-startup-id feh --bg-fill ~/Pictures/wallpaper2.png"
+echo "   exec_always --no-startup-id picom -b"
+echo "   exec_always --no-startup-id ~/.config/polybar/launch.sh"
+echo ""
+echo "Troubleshooting:"
+echo "- If icons are missing in Polybar/terminals: ensure correct Nerd Fonts are installed and referenced in configs."
+echo "- If Polybar or other components don't start: check their respective config files and the i3 config for correct 'exec' lines."
+echo "- Review the script output for any WARNINGS."
+echo ""
+read -p "Press Enter to finish the script. Remember to reboot for all changes to take effect."
+
+exit 0
