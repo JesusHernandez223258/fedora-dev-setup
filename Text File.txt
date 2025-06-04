@@ -171,7 +171,6 @@ sudo apt install -y \
     yad \
     unzip \
     fonts-font-awesome \
-    fonts-ubuntu-mono-nerd-font # Common Nerd Font for icons
 
 # Install other Nerd Fonts if needed (example: FiraCode)
 # echo ">>> Optionally install other Nerd Fonts (e.g., FiraCode)..."
@@ -282,7 +281,6 @@ sudo sysctl -w vm.drop_caches=3 # Clear pagecache, dentries and inodes
 
 # 4.2. Listar servicios habilitados (para revisión manual)
 echo ">>> Listing enabled services (for your review):"
-systemctl list-unit-files --type=service --state=enabled
 echo "---------------------------------------------------------------------"
 echo "# INFO: Review the list above. You might want to disable unnecessary services."
 echo "# Example: To disable CUPS (printing), you would run: sudo systemctl disable cups.service"
