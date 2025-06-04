@@ -68,7 +68,6 @@ sudo apt install -y bleachbit ncdu htop net-tools lsof tree glances
 sudo apt install -y ufw
 echo "--- Enabling UFW (Firewall) and allowing OpenSSH..."
 sudo ufw enable
-sudo ufw allow OpenSSH
 echo "--- Testing network connectivity..."
 ping -c 4 archive.ubuntu.com
 
