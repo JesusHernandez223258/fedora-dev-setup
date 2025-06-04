@@ -43,7 +43,7 @@ flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.f
 
 # 1.5. Networking and Bluetooth
 echo ">>> Installing networking and Bluetooth tools..."
-sudo apt install -y network-manager wireless-tools wpasupplicant bluez
+sudo apt install -y network-manager wpasupplicant bluez
 sudo systemctl enable --now bluetooth.service
 
 # 1.6. Printing (CUPS) - Optional for a minimal server, but in your list
