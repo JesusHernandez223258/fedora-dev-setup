@@ -1,71 +1,202 @@
+# README: Guía post-install para Fedora (post-install / setup)
 
-Asegúrate de tener la carpeta `config` con los archivos de configuración de ejemplo en el mismo directorio que el script `setup.sh`. Puedes modificar estos archivos (`dnf.conf`, `.zshrc`, `.p10k.zsh`) para personalizar la configuración antes de ejecutar el script.
+**Propósito:** Guía modular y reproducible para dejar una instalación de Fedora (Workstation/Kinoite/Silverblue) en un estado estable, compatible y preparada para uso diario y desarrollo. Diseñada para ser usada como `README.md` en un repositorio Git que contenga scripts y notas.
 
-## Cómo Usar
+---
 
-1.  **Clonar/Descargar el repositorio:** Obtén los archivos del script y la carpeta `config`.
-2.  **Dar permisos de ejecución:** Abre una terminal en el directorio donde guardaste los archivos y ejecuta:
-    ```bash
-    chmod +x setup.sh
-    ```
-3.  **Ejecutar las fases del script:** Ejecuta el script con `sudo`, especificando la fase que deseas ejecutar. **Sigue la secuencia recomendada y realiza los pasos intermedios (reinicios/re-login) cuando se te indique.**
+## Índice
 
-### Secuencia de Ejecución Recomendada
+1. Introducción
+2. Precauciones y prerequisitos
+3. Repositorios y third-party (RPM Fusion, Flathub, otros)
+4. Actualización inicial y firmware
+5. Layout Btrfs y Timeshift (snapshots)
+6. Drivers gráficos (NVIDIA) y firmware adicionales
+7. Códecs multimedia y soporte de audio/video
+8. Flatpak / Snap / AppImage — gestión y herramientas
+9. Herramientas básicas y utilidades (CLI/GUI)
+10. Configuración hardware-específica (ASUS / ROG)
+11. Montado y permisos de discos externos (compatibilidad Windows)
+12. Backup, snapshots y rollback (Timeshift, rsync, borg)
+13. Kernels personalizados — riesgo y rollback
+14. Desarrollo: runtimes, SDKs, Docker, lenguajes
+15. Automatización: scripts postinstall y Ansible
+16. Validación y pruebas
+17. FAQ & Troubleshooting
+18. Cambios / Changelog
 
-Ejecuta los siguientes comandos *uno por uno* en el orden listado, siguiendo cuidadosamente las instrucciones que aparecen en la terminal después de cada fase.
+---
 
-1.  **Fase 1: Configuración Inicial, Repositorios, Herramientas Básicas, Firmware**
-    ```bash
-    sudo ./setup.sh phase1
-    ```
-    *   Configura `/etc/dnf/dnf.conf`.
-    *   Instala herramientas básicas (`git`, `unzip`, etc.).
-    *   Habilita repositorios (RPMFusion, COPR CLI, Terra, Flatpak, Snap).
-    *   Actualiza el sistema.
-    *   Actualiza el firmware.
-    *   **¡IMPORTANTE!** Al finalizar, el script te pedirá **REINICIAR** el sistema. Debes hacerlo antes de continuar con la Fase 2. El script saldrá automáticamente.
+## 1. Introducción
 
-2.  **Fase 2: Soporte del Sistema y Entorno de Desarrollo Base**
-    ```bash
-    sudo ./setup.sh phase2
-    ```
-    *   **Detecta tu hardware (GPU, Virtualización).**
-    *   Instala drivers gráficos (Nvidia si se detecta y confirmas, o firmware para AMD/Intel).
-    *   Instala soporte multimedia y codecs.
-    *   Instala grupos de software comunes (herramientas de admin, desarrollo, etc.).
-    *   Instala soporte de virtualización (KVM/QEMU/libvirt) y añade tu usuario al grupo `libvirt`.
-    *   Instala Docker y añade tu usuario al grupo `docker`.
-    *   Instala lenguajes y herramientas de desarrollo (Java, Maven, Ant, Golang, Node.js, Yarn, Bun - este último con confirmación).
-    *   Configura variables de entorno (GOPATH, PATH para Node/npm/Bun) en tu archivo de perfil (`.bashrc` o `.zshrc`).
-    *   **¡IMPORTANTE!** Al finalizar, el script te indicará que **CIERRES Y VUELVAS A INICIAR TU SESIÓN** (o reinicies completamente) para que los cambios de grupo y las variables de entorno surtan efecto. Debes hacerlo antes de continuar con la Fase 3. El script saldrá automáticamente.
+Breve descripción del objetivo del repo y cómo usar esta guía: pasos recomendados en orden (repos → actualización → drivers → backups → personalización → dev).
 
-3.  **Fase 3: Configuración de Terminal y Aplicaciones**
-    ```bash
-    sudo ./setup.sh phase3
-    ```
-    *   Instala Zsh.
-    *   Solicita confirmación para cambiar tu shell por defecto a Zsh (te dará el comando para ejecutarlo manualmente, que es lo más seguro).
-    *   Configura Oh My Zsh y clona Powerlevel10k.
-    *   Copia tus archivos de configuración local (`.zshrc`, `.p10k.zsh`) a tu directorio `$HOME`.
-    *   Instala aplicaciones Flatpak de Flathub y Fedora remote.
-    *   Instala aplicaciones Snap.
-    *   **¡IMPORTANTE!** Al finalizar, el script te indicará que **CIERRES Y VUELVAS A INICIAR TU SESIÓN** (o reinicies completamente) para que la nueva shell Zsh, la configuración de Oh My Zsh/Powerlevel10k y las aplicaciones instaladas estén disponibles en tu entorno de escritorio/terminal. Debes hacerlo antes de continuar con la Fase 4 (si la vas a ejecutar). El script saldrá automáticamente.
+## 2. Precauciones y prerequisitos
 
-4.  **Fase 4 (OPCIONAL): Configuración de Secure Boot**
-    ```bash
-    sudo ./setup.sh phase4
-    ```
-    *   **¡ATENCIÓN!** Esta fase es OPCIONAL y solo necesaria si tienes Secure Boot habilitado en tu UEFI/BIOS y necesitas que módulos del kernel no firmados (como los drivers Nvidia propietarios) funcionen correctamente.
-    *   Solicita confirmación antes de proceder.
-    *   Instala herramientas de Secure Boot.
-    *   Genera una clave MOK local.
-    *   Importa la clave pública en la lista de claves MOK (esto requiere que introduzcas una contraseña durante la ejecución del script).
-    *   **¡CRÍTICO!** Al finalizar, el script te mostrará **INSTRUCCIONES DETALLADAS Y CRÍTICAS** sobre los pasos MANUALES que debes seguir **INMEDIATAMENTE DESPUÉS DE REINICIAR**. Debes interactuar con la pantalla de MOK Management antes de que Fedora inicie para completar la importación de la clave usando la contraseña que ingresaste.
-    *   Después de completar los pasos manuales de MOK Management, es posible que el sistema te pida **REINICIAR** de nuevo.
+* Tener copia de seguridad (si ya existen datos importantes).
+* Entender UEFI vs legacy y Secure Boot (si se usan drivers propietarios: Secure Boot puede requerir firmar módulos).
+* Tener conexión a Internet y permiso `sudo`.
 
-### Mostrar Secuencia Completa
+## 3. Repositorios y third-party
 
-Si solo quieres ver un resumen de la secuencia de fases y los pasos intermedios requeridos, puedes usar el argumento `all`:
+**Objetivo:** habilitar repositorios necesarios que no vienen por defecto para codecs, drivers y software propietario.
+
+### Repositorios recomendados
+
+* RPM Fusion (free + nonfree) — para drivers NVIDIA, códecs y paquetes no empaquetados en Fedora.
+* Flathub — repositorio Flatpak para aplicaciones de escritorio.
+* (Opcional) Copias de seguridad de repos personales o repos de terceros según necesidad.
+
+### Comandos de ejemplo
 
 ```bash
-./setup.sh all
+# RPM Fusion (instalación por DNF - ejemplo para Fedora 42+)
+sudo dnf install -y https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+
+# Habilitar Flathub (si no está habilitado)
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+```
+
+**Notas de seguridad:** revisar las fuentes antes de añadir repos. Mantener actualizado el GPG y firmas de paquetes.
+
+## 4. Actualización inicial y firmware
+
+* Actualizar metadatos y paquetes del sistema inmediatamente después de habilitar repos.
+
+```bash
+sudo dnf upgrade --refresh -y
+sudo dnf install -y fwupd
+# Actualizar firmware (interactivo)
+sudo fwupdmgr get-devices && sudo fwupdmgr refresh && sudo fwupdmgr update
+```
+
+## 5. Layout Btrfs y Timeshift (snapshots)
+
+**Contexto:** Timeshift en modo BTRFS exige una estructura con subvolúmenes nombrados `@` y opcionalmente `@home` para que funcione correctamente.
+
+### Recomendación general
+
+* Si tu instalación ya usa BTRFS con subvolúmenes distintos, crear o renombrar los subvolúmenes para que Timeshift los detecte.
+
+### Comandos de ejemplo (desde live USB si es necesario)
+
+```bash
+# Montar la partición btrfs y crear subvolúmenes
+sudo mount /dev/sdXn /mnt
+sudo btrfs subvolume create /mnt/@
+sudo btrfs subvolume create /mnt/@home
+# Ajustar fstab para montar subvol=@ en / y subvol=@home en /home
+# Ejemplo fstab entry:
+# UUID=XXX / btrfs defaults,subvol=@,compress=zstd:3,space_cache=v2 0 0
+```
+
+**Configurar Timeshift**: elegir *BTRFS* como modo y seleccionar la partición que contiene los subvolúmenes. Configurar retención y programaciones.
+
+## 6. Drivers gráficos (NVIDIA) y firmware adicionales
+
+**VPN / NVIDIA:** Instalar los paquetes recomendados por RPM Fusion para tarjetas NVIDIA.
+
+```bash
+sudo dnf install akmod-nvidia xorg-x11-drv-nvidia-cuda
+# Instalar utilidades relacionadas
+sudo dnf install nvidia-settings
+```
+
+**Secure Boot:** si está activado, puede requerir firmar los módulos o desactivar Secure Boot.
+
+## 7. Códecs multimedia y soporte de audio/video
+
+Instalar paquetes multimedia desde RPM Fusion.
+
+```bash
+sudo dnf groupupdate -y multimedia
+sudo dnf install -y gstreamer1-plugins-{bad-free,good,ugly} gstreamer1-libav ffmpeg
+```
+
+## 8. Flatpak / Snap / AppImage — gestión y herramientas
+
+* Instalar Flatpak y Flathub (ver sección 3).
+* Recomendar `flatseal` o `Flatpak permission manager` para gestionar permisos.
+
+```bash
+sudo dnf install -y flatpak
+flatpak install flathub com.github.tchx84.Flatseal
+```
+
+## 9. Herramientas básicas y utilidades (CLI/GUI)
+
+Lista recomendada (ejemplo): `htop btop neofetch fastfetch git vim curl wget unzip p7zip-nonfree`.
+
+```bash
+sudo dnf install -y htop btop git vim curl wget p7zip
+```
+
+## 10. Configuración hardware-específica (ASUS / ROG)
+
+* Herramientas: `asusctl`, `rog-core`, `asus-headers` (según disponibilidad), y `asusctl` GUI.
+* Algunas funcionalidades dependen de módulos/kernels parcheados (ej.: `asus_armoury` o parches ROG). Si se usan kernels externos (CachyOS/Cachy kernel) hay que considerar riesgos.
+
+## 11. Montado y permisos de discos externos (compatibilidad Windows)
+
+**Objetivo:** permitir ejecutar proyectos desde un disco formateado en NTFS sin errores de permisos al compilar.
+
+* Montar con `ntfs-3g` y opciones adecuadas:
+
+```bash
+sudo dnf install -y ntfs-3g
+sudo mkdir -p /mnt/windows_disk
+sudo mount -t ntfs-3g -o uid=1000,gid=1000,umask=022 /dev/sdXY /mnt/windows_disk
+```
+
+* Ajustar `uid`/`gid`/`fmask`/`dmask` según necesidad para que usuarios puedan ejecutar scripts y compilar.
+
+## 12. Backup, snapshots y rollback
+
+* Timeshift (btrfs) + rsync remoto o borg para copias de seguridad de datos. Configurar periodicidad y retención.
+
+## 13. Kernels personalizados — riesgo y rollback
+
+* Explicar riesgos: incompatibilidades, necesidad de reinstalar drivers, riesgo de no bootear.
+* Recomendación: mantener al menos un kernel stock y firmar módulos si usas Secure Boot.
+* Procedimiento de rollback: conservar initramfs y un kernel alternativo en GRUB; crear snapshot con Timeshift antes de cambiar kernel.
+
+## 14. Desarrollo: runtimes, SDKs, Docker, lenguajes
+
+* Instalar dnf group/package para desarrolladores, ejemplo:
+
+```bash
+sudo dnf install -y @development-tools @cdevelopment
+sudo dnf install -y docker docker-compose
+# SDKs y lenguajes
+dnf install -y java-17-openjdk-devel python3 python3-virtualenv golang rust cargo nodejs
+```
+
+## 15. Automatización: scripts postinstall y Ansible
+
+* Recomendar crear scripts `postinstall.sh` y/o usar Ansible playbook para reproducibilidad.
+* Estructura del repo: `scripts/`, `ansible/`, `docs/`, `README.md`.
+
+## 16. Validación y pruebas
+
+* Lista rápida de verificaciones: `dnf check`, probar GPU con `glxinfo`/`vulkaninfo`, probar audio, comprobar snapshots Timeshift, comprobar montaje NTFS.
+
+## 17. FAQ & Troubleshooting
+
+* Errores comunes y soluciones rápidas (ej.: Secure Boot + NVIDIA → firmar módulos; Timeshift no detecta BTRFS → revisar subvol names).
+
+## 18. Changelog
+
+* Mantener un `CHANGELOG.md` donde se anote cada cambio de la guía o de scripts.
+
+---
+
+## Anexos: scripts de ejemplo
+
+* `scripts/postinstall.sh` (plantilla) — instalar repos, actualizar, instalar paquetes básicos.
+* `scripts/create-btrfs-subvols.sh` — ejemplo para crear `@` y `@home` desde live USB.
+
+---
+
+*Versión inicial: 0.1 — creado como borrador. Revisión: documentar pruebas y añadir secciones específicas por modelo de laptop (ASUS ROG) y ejemplos de `fstab` reales según configuración del usuario.*
+
+<!-- Fin del README -->
